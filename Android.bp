@@ -27,6 +27,8 @@ android_library {
         "SystemUISharedLib",
         "SystemUI-statsd",
         "iconloader_base",
+        "smartspace-proto-java",
+        "smartspace-proto-lite-java",
     ],
     manifest: "AndroidManifest.xml",
 
