@@ -3,15 +3,20 @@ package com.google.android.systemui.smartspace;
 import android.app.smartspace.SmartspaceAction;
 import android.app.smartspace.SmartspaceTarget;
 import android.content.Context;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.TouchDelegate;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.android.app.animation.Interpolators;
 import com.android.launcher3.icons.GraphicsUtils;
 import com.android.systemui.bcsmartspace.R;
@@ -19,31 +24,27 @@ import com.android.systemui.plugins.BcSmartspaceDataPlugin;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLoggingInfo;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardMetadataLoggingInfo;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceSubcardLoggingInfo;
+import com.google.android.systemui.smartspace.utils.ContentDescriptionUtil;
 import java.util.List;
 import java.util.Locale;
 
-public class BcSmartspaceCard extends ConstraintLayout {
+public class BcSmartspaceCard extends ConstraintLayout implements SmartspaceCard {
+    public final DoubleShadowIconDrawable mBaseActionIconDrawable;
+    public Rect mBaseActionIconSubtitleHitRect;
     public DoubleShadowTextView mBaseActionIconSubtitleView;
-    public IcuDateTextView mDateView;
-    public final DoubleShadowIconDrawable mDndIconDrawable;
-    public ImageView mDndImageView;
     public float mDozeAmount;
     public BcSmartspaceDataPlugin.SmartspaceEventNotifier mEventNotifier;
-    public ViewGroup mExtrasGroup;
     public final DoubleShadowIconDrawable mIconDrawable;
     public int mIconTintColor;
-    public boolean mIsDreaming;
-    public final DoubleShadowIconDrawable mNextAlarmIconDrawable;
-    public ImageView mNextAlarmImageView;
-    public TextView mNextAlarmTextView;
-    public String mPrevSmartspaceTargetId;
+    public BcSmartspaceCardLoggingInfo mLoggingInfo;
     public BcSmartspaceCardSecondary mSecondaryCard;
     public ViewGroup mSecondaryCardGroup;
     public TextView mSubtitleTextView;
     public SmartspaceTarget mTarget;
     public ViewGroup mTextGroup;
     public TextView mTitleTextView;
-    public int mTopPadding;
+    public boolean mTouchDelegateIsDirty;
+    public String mUiSurface;
     public boolean mUsePageIndicatorUi;
     public boolean mValidSecondaryCard;
 
@@ -54,29 +55,31 @@ public class BcSmartspaceCard extends ConstraintLayout {
     public BcSmartspaceCard(Context context, AttributeSet attributeSet) {
         super(context, attributeSet);
         this.mSecondaryCard = null;
-        this.mPrevSmartspaceTargetId = "";
         this.mIconTintColor = GraphicsUtils.getAttrColor(getContext(), 16842806);
         this.mTextGroup = null;
         this.mSecondaryCardGroup = null;
-        this.mDateView = null;
         this.mTitleTextView = null;
         this.mSubtitleTextView = null;
         this.mBaseActionIconSubtitleView = null;
-        this.mExtrasGroup = null;
-        this.mDndImageView = null;
-        this.mNextAlarmImageView = null;
-        this.mNextAlarmTextView = null;
-        this.mIsDreaming = false;
+        this.mBaseActionIconSubtitleHitRect = null;
+        this.mUiSurface = null;
+        this.mTouchDelegateIsDirty = false;
+
+        context.getTheme().applyStyle(R.style.Smartspace, false);
+
         this.mIconDrawable = new DoubleShadowIconDrawable(context);
-        this.mNextAlarmIconDrawable = new DoubleShadowIconDrawable(context);
-        this.mDndIconDrawable = new DoubleShadowIconDrawable(context);
+        this.mBaseActionIconDrawable = new DoubleShadowIconDrawable(context);
+        setDefaultFocusHighlightEnabled(false);
     }
 
     public static int getClickedIndex(BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo, int i) {
         List<BcSmartspaceCardMetadataLoggingInfo> list;
+        if (bcSmartspaceCardLoggingInfo == null || (bcSmartspaceCardLoggingInfo.mSubcardInfo) == null) {
+            return 0;
+        }
         BcSmartspaceSubcardLoggingInfo bcSmartspaceSubcardLoggingInfo = bcSmartspaceCardLoggingInfo.mSubcardInfo;
         if (bcSmartspaceSubcardLoggingInfo == null || (list = bcSmartspaceSubcardLoggingInfo.mSubcards) == null) {
-            return 0;
+             return 0;
         }
         for (int i2 = 0; i2 < list.size(); i2++) {
             BcSmartspaceCardMetadataLoggingInfo bcSmartspaceCardMetadataLoggingInfo = list.get(i2);
@@ -87,49 +90,269 @@ public class BcSmartspaceCard extends ConstraintLayout {
         return 0;
     }
 
-    public final void setDozeAmount(float f) {
-        this.mDozeAmount = f;
-        if (this.mTarget != null && this.mTarget.getBaseAction() != null && this.mTarget.getBaseAction().getExtras() != null) {
-            Bundle extras = this.mTarget.getBaseAction().getExtras();
-            if (this.mTitleTextView != null && extras.getBoolean("hide_title_on_aod")) {
-                this.mTitleTextView.setAlpha(1.0f - f);
-            }
-            if (this.mSubtitleTextView != null && extras.getBoolean("hide_subtitle_on_aod")) {
-                this.mSubtitleTextView.setAlpha(1.0f - f);
-            }
+    @Override
+    public void bindData(SmartspaceTarget target, BcSmartspaceDataPlugin.SmartspaceEventNotifier notifier, BcSmartspaceCardLoggingInfo loggingInfo, boolean usePageIndicatorUi) {
+        this.mLoggingInfo = null;
+        this.mEventNotifier = null;
+        BcSmartspaceTemplateDataUtils.updateVisibility(this.mSecondaryCardGroup, 8);
+        BcSmartspaceTemplateDataUtils.updateVisibility(this.mBaseActionIconSubtitleView, 8);
+        this.mIconDrawable.setIconDrawable(null);
+        this.mBaseActionIconDrawable.setIconDrawable(null);
+        setTitle(null, null, false);
+        setSubtitle(null, null, false);
+        setBaseActionIconSubtitle(null, null, null);
+        updateIconTint();
+        setOnClickListener(null);
+        if (this.mTitleTextView != null) {
+            this.mTitleTextView.setOnClickListener(null);
+            this.mTitleTextView.setClickable(false);
         }
-        if (this.mDndImageView != null) {
-            this.mDndImageView.setAlpha(this.mDozeAmount);
+        if (this.mSubtitleTextView != null) {
+            this.mSubtitleTextView.setOnClickListener(null);
+            this.mSubtitleTextView.setClickable(false);
         }
+        if (this.mBaseActionIconSubtitleView != null) {
+             this.mBaseActionIconSubtitleView.setOnClickListener(null);
+             this.mBaseActionIconSubtitleView.setClickable(false);
+        }
+
+        this.mTarget = target;
+        this.mEventNotifier = notifier;
+        SmartspaceAction headerAction = target.getHeaderAction();
+        SmartspaceAction baseAction = target.getBaseAction();
+        this.mLoggingInfo = loggingInfo;
+        this.mUsePageIndicatorUi = usePageIndicatorUi;
+        this.mValidSecondaryCard = false;
+
         if (this.mTextGroup != null) {
-            ViewGroup viewGroup = this.mSecondaryCardGroup;
-            int i = 0;
-            int i2 = 1;
-            boolean z = this.mDozeAmount == 1.0f || !this.mValidSecondaryCard;
-            if (z) {
-                i = 8;
+             this.mTextGroup.setTranslationX(0.0f);
+        }
+
+        boolean hasHeaderAction = headerAction != null;
+        boolean hasBaseAction = baseAction != null;
+
+        if (hasHeaderAction) {
+            if (this.mSecondaryCard != null) {
+                this.mSecondaryCard.reset(target.getSmartspaceTargetId());
+                this.mValidSecondaryCard = this.mSecondaryCard.setSmartspaceActions(target, notifier, loggingInfo);
             }
-            BcSmartspaceTemplateDataUtils.updateVisibility(viewGroup, i);
-            ViewGroup viewGroup2 = this.mSecondaryCardGroup;
-            if (viewGroup2 != null && viewGroup2.getVisibility() != 8) {
-                ViewGroup viewGroup3 = this.mTextGroup;
-                if (!isRtl()) {
-                    i2 = -1;
-                }
-                viewGroup3.setTranslationX(Interpolators.EMPHASIZED.getInterpolation(this.mDozeAmount) * this.mSecondaryCardGroup.getWidth() * i2);
-                this.mSecondaryCardGroup.setAlpha(Math.max(0.0f, Math.min(1.0f, ((1.0f - this.mDozeAmount) * 9.0f) - 6.0f)));
-                return;
+            if (this.mSecondaryCardGroup != null) {
+                this.mSecondaryCardGroup.setAlpha(1.0f);
             }
-            this.mTextGroup.setTranslationX(0.0f);
+            int secondaryCardVisibility = (this.mDozeAmount == 1.0f || !this.mValidSecondaryCard) ? 8 : 0;
+            BcSmartspaceTemplateDataUtils.updateVisibility(this.mSecondaryCardGroup, secondaryCardVisibility);
+
+            Drawable iconDrawable = BcSmartSpaceUtil.getIconDrawableWithCustomSize(headerAction.getIcon(), getContext(), getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_size));
+            boolean hasIcon = iconDrawable != null;
+            this.mIconDrawable.setIcon(iconDrawable);
+
+            CharSequence title = headerAction.getTitle();
+            CharSequence subtitle = headerAction.getSubtitle();
+            boolean isFeatureType1 = target.getFeatureType() == 1;
+            boolean hasTitle = !TextUtils.isEmpty(title) || isFeatureType1;
+            boolean hasSubtitle = !TextUtils.isEmpty(subtitle);
+            boolean titleHasIcon = hasTitle && !hasSubtitle && hasIcon && isFeatureType1;
+
+            setTitle(title, headerAction.getContentDescription(), titleHasIcon);
+
+            CharSequence subtitleText = hasSubtitle ? subtitle : null;
+            boolean subtitleHasIcon = hasIcon;
+            if (isFeatureType1 && !hasSubtitle) {
+                subtitleHasIcon = false;
+            }
+             setSubtitle(subtitleText, headerAction.getContentDescription(), subtitleHasIcon);
+        }
+
+        if (hasBaseAction) {
+            Bundle extras = baseAction.getExtras();
+            int subcardType = -1;
+            if (extras != null && !extras.isEmpty()) {
+                 subcardType = extras.getInt("subcardType", -1);
+            }
+
+            Drawable baseActionIcon = BcSmartSpaceUtil.getIconDrawableWithCustomSize(baseAction.getIcon(), getContext(), getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_size));
+            this.mBaseActionIconDrawable.setIcon(baseActionIcon);
+            setBaseActionIconSubtitle(baseAction.getSubtitle(), baseAction.getContentDescription(), this.mBaseActionIconDrawable);
+
+            int clickIndex = 0;
+            if (subcardType != -1) {
+                clickIndex = getClickedIndex(loggingInfo, subcardType);
+            } else {
+                 Log.d("BcSmartspaceCard", "Subcard expected but missing type. loggingInfo=" + loggingInfo + ", baseAction=" + baseAction);
+            }
+
+            BcSmartSpaceUtil.setOnClickListener(this.mBaseActionIconSubtitleView, target, baseAction, notifier, "BcSmartspaceCard", loggingInfo, clickIndex);
+        }
+
+        updateIconTint();
+
+        SmartspaceAction tapAction = hasHeaderAction ? headerAction : baseAction;
+        if (headerAction != null && (headerAction.getIntent() != null || headerAction.getPendingIntent() != null)) {
+             tapAction = headerAction;
+        } else if (baseAction != null && (baseAction.getIntent() != null || baseAction.getPendingIntent() != null)) {
+             tapAction = baseAction;
+        }
+
+        if (tapAction != null) {
+            int clickIndex = 0;
+             if (target.getFeatureType() == 1 && loggingInfo.mFeatureType == 39) {
+                   clickIndex = getClickedIndex(loggingInfo, 1);
+             }
+             BcSmartSpaceUtil.setOnClickListener((View)this, target, tapAction, notifier, "BcSmartspaceCard", loggingInfo, clickIndex);
+        }
+
+        if (this.mSecondaryCardGroup != null) {
+            ViewGroup.LayoutParams lp = this.mSecondaryCardGroup.getLayoutParams();
+            if (lp instanceof ConstraintLayout.LayoutParams) {
+                 ConstraintLayout.LayoutParams clp = (ConstraintLayout.LayoutParams) lp;
+                 int width = getWidth();
+                 if (BcSmartSpaceUtil.getFeatureType(target) == -2) {
+                     clp.matchConstraintMaxWidth = (width * 3) / 4;
+                 } else {
+                     clp.matchConstraintMaxWidth = width / 2;
+                 }
+                 this.mSecondaryCardGroup.setLayoutParams(clp);
+            }
+        }
+        this.mTouchDelegateIsDirty = true;
+    }
+
+    @Override
+    public AccessibilityNodeInfo createAccessibilityNodeInfo() {
+        AccessibilityNodeInfo nodeInfo = super.createAccessibilityNodeInfo();
+        AccessibilityNodeInfoCompat.wrap(nodeInfo).setRoleDescription(" ");
+        return nodeInfo;
+    }
+
+    @Override
+    public BcSmartspaceCardLoggingInfo getLoggingInfo() {
+        if (this.mLoggingInfo != null) {
+            return this.mLoggingInfo;
+        }
+        int displaySurface = BcSmartSpaceUtil.getLoggingDisplaySurface(this.mUiSurface, this.mDozeAmount);
+        int featureType = 0;
+        if (this.mTarget != null) {
+            featureType = this.mTarget.getFeatureType();
+        }
+
+        BcSmartspaceCardLoggingInfo.Builder builder = new BcSmartspaceCardLoggingInfo.Builder();
+        builder.mInstanceId = 0;
+        builder.mDisplaySurface = displaySurface;
+        builder.mRank = 0;
+        builder.mCardinality = 0;
+        builder.mFeatureType = featureType;
+        builder.mReceivedLatency = 0;
+        builder.mUid = -1;
+        builder.mSubcardInfo = null;
+        builder.mDimensionalInfo = null;
+        return new BcSmartspaceCardLoggingInfo(builder);
+    }
+
+    @Override
+    public View getView() {
+        return this;
+    }
+
+    @Override
+    public void onFinishInflate() {
+        super.onFinishInflate();
+        this.mTextGroup = findViewById(R.id.text_group);
+        this.mSecondaryCardGroup = findViewById(R.id.secondary_card_group);
+        this.mTitleTextView = findViewById(R.id.title_text);
+        this.mSubtitleTextView = findViewById(R.id.subtitle_text);
+        this.mBaseActionIconSubtitleView = findViewById(R.id.base_action_icon_subtitle);
+
+        if (this.mBaseActionIconSubtitleView != null) {
+            this.mBaseActionIconSubtitleHitRect = new Rect();
         }
     }
 
-    public final void setPrimaryTextColor(int i) {
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        if (!changed && !this.mTouchDelegateIsDirty) {
+            return;
+        }
+        this.mTouchDelegateIsDirty = false;
+        setTouchDelegate(null);
+        if (this.mBaseActionIconSubtitleView == null || this.mBaseActionIconSubtitleView.getVisibility() != 0) {
+            return;
+        }
+
+        int height = this.mBaseActionIconSubtitleView.getHeight();
+        int hitRectHeight = getResources().getDimensionPixelSize(R.dimen.subtitle_hit_rect_height);
+        int offset = (hitRectHeight - height) / 2;
+
+        this.mBaseActionIconSubtitleView.getHitRect(this.mBaseActionIconSubtitleHitRect);
+        offsetDescendantRectToMyCoords((View)this.mBaseActionIconSubtitleView.getParent(), this.mBaseActionIconSubtitleHitRect);
+
+        if (offset > 0) {
+             if (this.mBaseActionIconSubtitleHitRect.top - offset >= 0) {
+                   this.mBaseActionIconSubtitleHitRect.top -= offset;
+             }
+        }
+        this.mBaseActionIconSubtitleHitRect.bottom = getHeight();
+        setTouchDelegate(new TouchDelegate(this.mBaseActionIconSubtitleHitRect, this.mBaseActionIconSubtitleView));
+    }
+
+    public void setBaseActionIconSubtitle(CharSequence text, CharSequence contentDescription, Drawable icon) {
+        if (this.mBaseActionIconSubtitleView == null) {
+            Log.w("BcSmartspaceCard", "No base action icon subtitle view to update");
+            return;
+        }
+        if (TextUtils.isEmpty(text)) {
+            BcSmartspaceTemplateDataUtils.updateVisibility(this.mBaseActionIconSubtitleView, 8);
+            return;
+        }
+        BcSmartspaceTemplateDataUtils.updateVisibility(this.mBaseActionIconSubtitleView, 0);
+        this.mBaseActionIconSubtitleView.setText(text);
+        this.mBaseActionIconSubtitleView.setCompoundDrawablesRelative(icon, null, null, null);
+        ContentDescriptionUtil.setFormattedContentDescription("BcSmartspaceCard", this.mBaseActionIconSubtitleView, text, contentDescription);
+    }
+
+    @Override
+    public void setDozeAmount(float f) {
+        this.mDozeAmount = f;
+        SmartspaceTarget target = this.mTarget;
+        if (target != null) {
+             SmartspaceAction baseAction = target.getBaseAction();
+             if (baseAction != null && baseAction.getExtras() != null) {
+                 Bundle extras = baseAction.getExtras();
+                 if (this.mTitleTextView != null && extras.getBoolean("hide_title_on_aod")) {
+                     this.mTitleTextView.setAlpha(1.0f - f);
+                 }
+                 if (this.mSubtitleTextView != null && extras.getBoolean("hide_subtitle_on_aod")) {
+                     this.mSubtitleTextView.setAlpha(1.0f - f);
+                 }
+             }
+        }
+
+        if (this.mTextGroup != null) {
+            int visibility = 8;
+            if (this.mDozeAmount != 1.0f && this.mValidSecondaryCard) {
+                visibility = 0;
+            }
+            BcSmartspaceTemplateDataUtils.updateVisibility(this.mSecondaryCardGroup, visibility);
+
+            if (this.mTarget != null && this.mTarget.getFeatureType() == 30) {
+                 return;
+            }
+
+            if (this.mSecondaryCardGroup != null && this.mSecondaryCardGroup.getVisibility() != 8) {
+                 int direction = isRtl() ? 1 : -1;
+                 int width = this.mSecondaryCardGroup.getWidth();
+                 this.mTextGroup.setTranslationX(Interpolators.EMPHASIZED.getInterpolation(this.mDozeAmount) * width * direction);
+                 this.mSecondaryCardGroup.setAlpha(Math.max(0.0f, Math.min(1.0f, (1.0f - this.mDozeAmount) * 9.0f - 6.0f)));
+            } else {
+                 this.mTextGroup.setTranslationX(0.0f);
+            }
+        }
+    }
+
+    @Override
+    public void setPrimaryTextColor(int i) {
         if (this.mTitleTextView != null) {
             this.mTitleTextView.setTextColor(i);
-        }
-        if (this.mDateView != null) {
-            this.mDateView.setTextColor(i);
         }
         if (this.mSubtitleTextView != null) {
             this.mSubtitleTextView.setTextColor(i);
@@ -141,197 +364,118 @@ public class BcSmartspaceCard extends ConstraintLayout {
             this.mSecondaryCard.setTextColor(i);
         }
         this.mIconTintColor = i;
-        if (this.mNextAlarmTextView != null) {
-            this.mNextAlarmTextView.setTextColor(i);
-        }
-        if (this.mNextAlarmImageView != null && this.mNextAlarmImageView.getDrawable() != null) {
-            this.mNextAlarmImageView.getDrawable().setTint(this.mIconTintColor);
-        }
-        if (this.mDndImageView != null && this.mDndImageView.getDrawable() != null) {
-            this.mDndImageView.getDrawable().setTint(this.mIconTintColor);
-        }
         updateIconTint();
     }
 
-    public final void setSubtitle(CharSequence charSequence, CharSequence charSequence2, boolean z) {
-        DoubleShadowIconDrawable doubleShadowIconDrawable;
-        int i;
+    @Override
+    public void setScreenOn(boolean z) {
+    }
+
+    public void setSecondaryCard(BcSmartspaceCardSecondary secondaryCard) {
+        this.mSecondaryCard = secondaryCard;
+        if (this.mSecondaryCardGroup != null) {
+            BcSmartspaceTemplateDataUtils.updateVisibility(this.mSecondaryCardGroup, 8);
+            this.mSecondaryCardGroup.removeAllViews();
+            if (secondaryCard != null) {
+                ConstraintLayout.LayoutParams lp = new ConstraintLayout.LayoutParams(-2, getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_card_height));
+                lp.setMarginStart(getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_secondary_card_start_margin));
+                lp.startToStart = 0;
+                lp.topToTop = 0;
+                lp.bottomToBottom = 0;
+                this.mSecondaryCardGroup.addView(secondaryCard, lp);
+            }
+        }
+    }
+
+    public void setSubtitle(CharSequence charSequence, CharSequence charSequence2, boolean z) {
         if (this.mSubtitleTextView == null) {
             Log.w("BcSmartspaceCard", "No subtitle view to update");
             return;
         }
         this.mSubtitleTextView.setText(charSequence);
-        DoubleShadowIconDrawable doubleShadowIconDrawable2 = null;
+        DoubleShadowIconDrawable doubleShadowIconDrawable = null;
         if (!TextUtils.isEmpty(charSequence) && z) {
             doubleShadowIconDrawable = this.mIconDrawable;
-        } else {
-            doubleShadowIconDrawable = null;
         }
         this.mSubtitleTextView.setCompoundDrawablesRelative(doubleShadowIconDrawable, null, null, null);
-        SmartspaceTarget smartspaceTarget = this.mTarget;
-        if (smartspaceTarget != null && smartspaceTarget.getFeatureType() == 5 && !this.mUsePageIndicatorUi) {
-            i = 2;
-        } else {
-            i = 1;
+
+        int maxLines = 1;
+        if (this.mTarget != null && this.mTarget.getFeatureType() == 5 && !this.mUsePageIndicatorUi) {
+            maxLines = 2;
         }
-        this.mSubtitleTextView.setMaxLines(i);
-        setFormattedContentDescription(this.mSubtitleTextView, charSequence, charSequence2);
-        if (z) {
-            doubleShadowIconDrawable2 = this.mIconDrawable;
-        }
-        BcSmartspaceTemplateDataUtils.offsetTextViewForIcon(this.mSubtitleTextView, doubleShadowIconDrawable2, isRtl());
+        this.mSubtitleTextView.setMaxLines(maxLines);
+
+        ContentDescriptionUtil.setFormattedContentDescription("BcSmartspaceCard", this.mSubtitleTextView, charSequence, charSequence2);
+
+        DoubleShadowIconDrawable icon = z ? this.mIconDrawable : null;
+        BcSmartspaceTemplateDataUtils.offsetTextViewForIcon(this.mSubtitleTextView, icon, isRtl());
     }
 
-    public final void setTitle(CharSequence charSequence, CharSequence charSequence2, boolean z) {
-        SmartspaceAction headerAction;
-        Bundle extras;
-        boolean z2;
-        DoubleShadowIconDrawable doubleShadowIconDrawable;
+    public void setTitle(CharSequence charSequence, CharSequence charSequence2, boolean z) {
         if (this.mTitleTextView == null) {
             Log.w("BcSmartspaceCard", "No title view to update");
             return;
         }
         this.mTitleTextView.setText(charSequence);
-        DoubleShadowIconDrawable doubleShadowIconDrawable2 = null;
-        if (this.mTarget == null) {
-            headerAction = null;
-        } else {
-            headerAction = this.mTarget.getHeaderAction();
-        }
-        if (headerAction == null) {
-            extras = null;
-        } else {
-            extras = headerAction.getExtras();
-        }
+        SmartspaceAction headerAction = (this.mTarget != null) ? this.mTarget.getHeaderAction() : null;
+        Bundle extras = (headerAction != null) ? headerAction.getExtras() : null;
+
         if (extras != null && extras.containsKey("titleEllipsize")) {
-            String string = extras.getString("titleEllipsize");
+            String truncateAt = extras.getString("titleEllipsize");
             try {
-                this.mTitleTextView.setEllipsize(TextUtils.TruncateAt.valueOf(string));
+                this.mTitleTextView.setEllipsize(TextUtils.TruncateAt.valueOf(truncateAt));
             } catch (IllegalArgumentException e) {
-                Log.e("BcSmartspaceCard", "Invalid TruncateAt value: " + string);
+                Log.e("BcSmartspaceCard", "Invalid TruncateAt value: " + truncateAt);
             }
         } else if (this.mTarget != null && this.mTarget.getFeatureType() == 2 && Locale.ENGLISH.getLanguage().equals(getContext().getResources().getConfiguration().locale.getLanguage())) {
             this.mTitleTextView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         } else {
             this.mTitleTextView.setEllipsize(TextUtils.TruncateAt.END);
         }
-        boolean z3 = false;
+
+        int titleMaxLines = 0;
+        boolean disableTitleIcon = false;
         if (extras != null) {
-            int i = extras.getInt("titleMaxLines");
-            if (i != 0) {
-                this.mTitleTextView.setMaxLines(i);
-            }
-            z2 = extras.getBoolean("disableTitleIcon");
+            titleMaxLines = extras.getInt("titleMaxLines");
+            disableTitleIcon = extras.getBoolean("disableTitleIcon");
+        }
+        if (titleMaxLines != 0) {
+            this.mTitleTextView.setMaxLines(titleMaxLines);
+        }
+
+        boolean showIcon = z && !disableTitleIcon;
+        if (showIcon) {
+             ContentDescriptionUtil.setFormattedContentDescription("BcSmartspaceCard", this.mTitleTextView, charSequence, charSequence2);
+        }
+
+        DoubleShadowIconDrawable icon = showIcon ? this.mIconDrawable : null;
+        this.mTitleTextView.setCompoundDrawablesRelative(icon, null, null, null);
+        BcSmartspaceTemplateDataUtils.offsetTextViewForIcon(this.mTitleTextView, icon, isRtl());
+    }
+
+    public void updateIconTint() {
+        if (this.mTarget == null) return;
+
+        if (this.mTarget.getFeatureType() == 1) {
+            this.mIconDrawable.setTintList(null);
         } else {
-            z2 = false;
+            this.mIconDrawable.setTint(this.mIconTintColor);
         }
-        if (z && !z2) {
-            z3 = true;
+
+        SmartspaceAction baseAction = this.mTarget.getBaseAction();
+        int subcardType = -1;
+        if (baseAction != null && baseAction.getExtras() != null) {
+             subcardType = baseAction.getExtras().getInt("subcardType", -1);
         }
-        if (z3) {
-            setFormattedContentDescription(this.mTitleTextView, charSequence, charSequence2);
-        }
-        if (z3) {
-            doubleShadowIconDrawable = this.mIconDrawable;
+
+        if (subcardType == 1) {
+            this.mBaseActionIconDrawable.setTintList(null);
         } else {
-            doubleShadowIconDrawable = null;
-        }
-        this.mTitleTextView.setCompoundDrawablesRelative(doubleShadowIconDrawable, null, null, null);
-        if (z3) {
-            doubleShadowIconDrawable2 = this.mIconDrawable;
-        }
-        BcSmartspaceTemplateDataUtils.offsetTextViewForIcon(this.mTitleTextView, doubleShadowIconDrawable2, isRtl());
-    }
-
-    public final void updateIconTint() {
-        if (this.mTarget != null && this.mIconDrawable != null) {
-            boolean z = this.mTarget.getFeatureType() != 1;
-            if (z) {
-                this.mIconDrawable.setTint(this.mIconTintColor);
-            } else {
-                this.mIconDrawable.setTintList(null);
-            }
-        }
-    }
-
-    public final void updateZenVisibility() {
-        if (this.mExtrasGroup == null) {
-            return;
-        }
-        ImageView imageView = this.mDndImageView;
-        boolean z3 = true;
-        int i = 0;
-        boolean z = imageView != null && imageView.getVisibility() == 0;
-        ImageView imageView2 = this.mNextAlarmImageView;
-        boolean z2 = imageView2 != null && imageView2.getVisibility() == 0;
-        if ((!z && !z2) || (this.mUsePageIndicatorUi && (this.mTarget == null || this.mTarget.getFeatureType() != 1))) {
-            z3 = false;
-        }
-        int i2 = this.mTopPadding;
-        if (!z3) {
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mExtrasGroup, 4);
-            i = i2;
-        } else {
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mExtrasGroup, 0);
-            if (this.mNextAlarmTextView != null) {
-                this.mNextAlarmTextView.setTextColor(this.mIconTintColor);
-            }
-            if (this.mNextAlarmImageView != null && this.mNextAlarmImageView.getDrawable() != null) {
-                this.mNextAlarmImageView.getDrawable().setTint(this.mIconTintColor);
-            }
-            if (this.mDndImageView != null && this.mDndImageView.getDrawable() != null) {
-                this.mDndImageView.getDrawable().setTint(this.mIconTintColor);
-            }
-        }
-        setPadding(getPaddingLeft(), i, getPaddingRight(), getPaddingBottom());
-    }
-
-    public final AccessibilityNodeInfo createAccessibilityNodeInfo() {
-        AccessibilityNodeInfo createAccessibilityNodeInfo = super.createAccessibilityNodeInfo();
-        createAccessibilityNodeInfo.getExtras().putCharSequence("AccessibilityNodeInfo.roleDescription", " ");
-        return createAccessibilityNodeInfo;
-    }
-
-    public final void onFinishInflate() {
-        super.onFinishInflate();
-        this.mTextGroup = (ViewGroup) findViewById(R.id.text_group);
-        this.mSecondaryCardGroup = (ViewGroup) findViewById(R.id.secondary_card_group);
-        this.mDateView = (IcuDateTextView) findViewById(R.id.date);
-        this.mTitleTextView = (TextView) findViewById(R.id.title_text);
-        this.mSubtitleTextView = (TextView) findViewById(R.id.subtitle_text);
-        this.mBaseActionIconSubtitleView = (DoubleShadowTextView) findViewById(R.id.base_action_icon_subtitle);
-        this.mExtrasGroup = (ViewGroup) findViewById(R.id.smartspace_extras_group);
-        this.mTopPadding = getPaddingTop();
-        if (this.mExtrasGroup != null) {
-            this.mDndImageView = (ImageView) this.mExtrasGroup.findViewById(R.id.dnd_icon);
-            this.mNextAlarmImageView = (ImageView) this.mExtrasGroup.findViewById(R.id.alarm_icon);
-            this.mNextAlarmTextView = (TextView) this.mExtrasGroup.findViewById(R.id.alarm_text);
+            this.mBaseActionIconDrawable.setTint(this.mIconTintColor);
         }
     }
 
-    public final void setFormattedContentDescription(TextView textView, CharSequence charSequence, CharSequence charSequence2) {
-        String string;
-        String str;
-        if (TextUtils.isEmpty(charSequence)) {
-            string = String.valueOf(charSequence2);
-        } else if (TextUtils.isEmpty(charSequence2)) {
-            string = String.valueOf(charSequence);
-        } else {
-            string = getContext().getString(R.string.generic_smartspace_concatenated_desc, charSequence2, charSequence);
-        }
-        Object[] objArr = new Object[4];
-        if (textView == this.mTitleTextView) {
-            str = "TITLE";
-        } else if (textView == this.mSubtitleTextView) {
-            str = "SUBTITLE";
-        } else {
-            str = "SUPPLEMENTAL";
-        }
-        objArr[0] = str;
-        objArr[1] = charSequence;
-        objArr[2] = charSequence2;
-        objArr[3] = string;
-        Log.i("BcSmartspaceCard", String.format("setFormattedContentDescription: textView=%s, text=%s, iconDescription=%s, contentDescription=%s", objArr));
-        textView.setContentDescription(string);
+    private boolean isRtl() {
+        return getLayoutDirection() == 1;
     }
 }

@@ -22,10 +22,24 @@ import com.android.systemui.plugins.BcSmartspaceDataPlugin;
 import com.android.systemui.plugins.FalsingManager;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLogger;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLoggingInfo;
+import java.util.Map;
 
 public final class BcSmartSpaceUtil {
     private static final String GSA_PACKAGE = "com.google.android.googlequicksearchbox";
     private static final String GSA_WEATHER_ACTIVITY = "com.google.android.apps.search.weather.WeatherExportedActivity";
+    public static final Map<Integer, Integer> FEATURE_TYPE_TO_SECONDARY_CARD_RESOURCE_MAP = Map.ofEntries(
+            Map.entry(-1, R.layout.smartspace_card_combination),
+            Map.entry(-2, R.layout.smartspace_card_combination_at_store),
+            Map.entry(3, R.layout.smartspace_card_generic_landscape_image),
+            Map.entry(18, R.layout.smartspace_card_generic_landscape_image),
+            Map.entry(4, R.layout.smartspace_card_flight),
+            Map.entry(14, R.layout.smartspace_card_loyalty),
+            Map.entry(13, R.layout.smartspace_card_shopping_list),
+            Map.entry(9, R.layout.smartspace_card_sports),
+            Map.entry(10, R.layout.smartspace_card_weather_forecast),
+            Map.entry(30, R.layout.smartspace_card_doorbell),
+            Map.entry(20, R.layout.smartspace_card_doorbell)
+    );
 
     public static FalsingManager sFalsingManager;
     public static BcSmartspaceDataPlugin.IntentStarter sIntentStarter;
@@ -39,8 +53,8 @@ public final class BcSmartSpaceUtil {
                 intentStarter = new SmartspaceIntentStarter(str);
             }
             final BcSmartspaceDataPlugin.IntentStarter intentStarter2 = intentStarter;
-            view.setOnClickListener(new View.OnClickListener() { // from class: com.google.android.systemui.smartspace.BcSmartSpaceUtil.1
-                @Override // android.view.View.OnClickListener
+            view.setOnClickListener(new View.OnClickListener() {
+                @Override
                 public void onClick(View v) {
                     FalsingManager falsingManager = BcSmartSpaceUtil.sFalsingManager;
                     if (falsingManager == null || !falsingManager.isFalseTap(1)) {
@@ -69,8 +83,8 @@ public final class BcSmartSpaceUtil {
     public static void setOnClickListener(View view, final SmartspaceTarget smartspaceTarget, final TapAction tapAction, final BcSmartspaceDataPlugin.SmartspaceEventNotifier smartspaceEventNotifier, final String str, final BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo, final int i) {
         if (view != null && tapAction != null) {
             final boolean shouldShowOnLockscreen = tapAction.shouldShowOnLockscreen();
-            view.setOnClickListener(new View.OnClickListener() { // from class: com.google.android.systemui.smartspace.BcSmartSpaceUtil.2
-                @Override // android.view.View.OnClickListener
+            view.setOnClickListener(new View.OnClickListener() {
+                @Override
                 public void onClick(View view2) {
                     FalsingManager falsingManager = BcSmartSpaceUtil.sFalsingManager;
                     if (falsingManager == null || !falsingManager.isFalseTap(1)) {
@@ -141,10 +155,8 @@ public final class BcSmartSpaceUtil {
         return new Intent("android.intent.action.VIEW").setData(ContentUris.appendId(CalendarContract.CONTENT_URI.buildUpon().appendPath("time"), System.currentTimeMillis()).build()).addFlags(270532608);
     }
 
-    // Workaround for Google weather
     private static boolean hijackIntent(SmartspaceTarget smartspaceTarget, BcSmartspaceDataPlugin.IntentStarter intentStarter, View v) {
         if (v instanceof IcuDateTextView) {
-            // Ensure we don't change date view
             return false;
         }
         if (smartspaceTarget != null && smartspaceTarget.getFeatureType() == SmartspaceTarget.FEATURE_WEATHER) {
@@ -156,7 +168,6 @@ public final class BcSmartSpaceUtil {
         return false;
     }
 
-    /* renamed from: com.google.android.systemui.smartspace.BcSmartSpaceUtil$AnonymousClass1  reason: case insensitive filesystem */
     public static class SmartspaceIntentStarter implements BcSmartspaceDataPlugin.IntentStarter {
         public final String tag;
 
@@ -193,16 +204,12 @@ public final class BcSmartSpaceUtil {
         return null;
     }
 
-    public static int getLoggingDisplaySurface(float f, String str) {
+    public static int getLoggingDisplaySurface(String str, float f) {
         if (str == null) {
             return 0;
         }
 
-        if (str.equals(BcSmartspaceDataPlugin.UI_SURFACE_HOME_SCREEN)) {
-            return 1;
-        } else if (str.equals(BcSmartspaceDataPlugin.UI_SURFACE_DREAM)) {
-            return 5;
-        } else if (str.equals(BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
+        if (str.equals("lockscreen")) {
             if (f == 1.0f) {
                 return 3;
             } else if (f == 0.0f) {
@@ -210,23 +217,10 @@ public final class BcSmartSpaceUtil {
             } else {
                 return -1;
             }
-        } else {
-            return 0;
-        }
-    }
-
-
-    public static int getLoggingDisplaySurface(String str, boolean z, float f) {
-        if (str.equals("com.google.android.apps.nexuslauncher")) {
-            return 1;
-        }
-        if (str.equals("com.android.systemui")) {
-            if (f == 1.0f) {
-                return 3;
-            }
-            return f == 0.0f ? 2 : -1;
-        } else if (z) {
+        } else if (str.equals("dream")) {
             return 5;
+        } else if (str.equals("home")) {
+            return 1;
         } else {
             return 0;
         }
