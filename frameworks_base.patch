@@ -12,7 +12,7 @@ Includes:
 
 Change-Id: Ibcsmartspace00000000000000000000000000000000
 ---
- packages/SystemUI/Android.bp                  |   1 +
+ packages/SystemUI/Android.bp                  |   2 +
  packages/SystemUI/AndroidManifest.xml         |  13 ++
  packages/SystemUI/res/values/flags.xml        |   2 +
  .../systemui/dagger/SystemUIModule.java       |   5 +
@@ -21,7 +21,7 @@ Change-Id: Ibcsmartspace00000000000000000000000000000000
  .../KeyguardZenAlarmViewController.kt         | 145 ++++++++++++++++++
  .../dagger/SmartspaceGoogleModule.java        |  25 ++++
  .../dagger/SmartspaceStartableModule.kt       |  32 ++++
- 9 files changed, 365 insertions(+)
+ 9 files changed, 366 insertions(+)
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
@@ -32,11 +32,12 @@ diff --git a/packages/SystemUI/Android.bp b/packages/SystemUI/Android.bp
 index 7c8b683d2d6d..513512d80642 100644
 --- a/packages/SystemUI/Android.bp
 +++ b/packages/SystemUI/Android.bp
-@@ -540,6 +540,7 @@ android_library {
+@@ -540,6 +540,8 @@ android_library {
          "kairos",
          "displaylib",
          "aconfig_settings_flags_lib",
 +        "bcsmartspace-google",
++        "androidx.viewpager2_viewpager2",
      ],
      manifest: "AndroidManifest.xml",
      libs: [

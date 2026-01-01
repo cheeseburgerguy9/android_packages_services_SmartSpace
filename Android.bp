@@ -4,6 +4,7 @@ android_library {
     static_libs: [
         "androidx.cardview_cardview",
         "androidx-constraintlayout_constraintlayout",
+        "androidx.viewpager2_viewpager2",
     ],
 
     optimize: {
@@ -29,6 +30,7 @@ android_library {
         "iconloader_base",
         "smartspace-proto-java",
         "smartspace-proto-lite-java",
+        "androidx.viewpager2_viewpager2",
     ],
     manifest: "AndroidManifest.xml",
 
