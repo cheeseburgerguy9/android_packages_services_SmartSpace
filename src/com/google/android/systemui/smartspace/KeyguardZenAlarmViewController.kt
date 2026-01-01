@@ -13,7 +13,6 @@ import com.android.systemui.plugins.BcSmartspaceDataPlugin
 import com.android.systemui.statusbar.policy.NextAlarmController
 import com.android.systemui.statusbar.policy.NextAlarmControllerImpl
 import com.android.systemui.statusbar.policy.ZenModeController
-import com.android.systemui.statusbar.policy.ZenModeControllerImpl
 import com.android.systemui.statusbar.policy.domain.interactor.ZenModeInteractor
 import com.android.systemui.statusbar.policy.domain.model.ZenModeInfo
 
@@ -42,7 +41,7 @@ constructor(
     val applicationScope: CoroutineScope,
     val bgDispatcher: CoroutineDispatcher,
 ) {
-    lateinit var alarmImage: Drawable
+    var alarmImage: Drawable? = context.getDrawable(R.drawable.ic_access_alarms_big)
     val smartspaceViews = mutableSetOf<BcSmartspaceDataPlugin.SmartspaceView>()
 
     private val nextAlarmCallback = NextAlarmController.NextAlarmChangeCallback {
@@ -114,11 +113,6 @@ constructor(
         }
     }
 
-    //private suspend fun getNextAlarmTime(): Long = withContext(bgDispatcher) {
-    //    val zenControllerImpl = zenModeController as? ZenModeControllerImpl ?: return@withContext 0L
-    //    zenControllerImpl.mAlarmManager.getNextAlarmClock(zenControllerImpl.mUserId)?.triggerTime ?: 0L
-    //}
-
     private suspend fun getNextAlarmTime(): Long = withContext(bgDispatcher) {
         val nextAlarm = alarmManager.getNextAlarmClock(ActivityManager.getCurrentUser())
         nextAlarm?.triggerTime ?: 0L
@@ -128,7 +122,7 @@ constructor(
         applicationScope.launch {
             if (zenModeInfo != null) {
                 val description = context.getString(
-                    R.string.active_mode_content_description, 
+                    R.string.active_mode_content_description,
                     zenModeInfo.name
                 )
                 view.setDnd(zenModeInfo.icon.drawable, description)
