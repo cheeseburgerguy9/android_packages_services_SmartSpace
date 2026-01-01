@@ -1,0 +1,480 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jules <jules@google.com>
+Date: Fri, 01 Mar 2024 12:00:00 +0000
+Subject: [PATCH] SystemUI: Add bcsmartspace-google support
+
+Integrates bcsmartspace-google library into SystemUI.
+
+Includes:
+- Permissions and flags for smartspace
+- Integration of KeyguardSmartspaceStartable via SystemUIModule
+- Smartspace View Controllers and Modules
+
+Change-Id: Ibcsmartspace00000000000000000000000000000000
+---
+ packages/SystemUI/Android.bp                  |   1 +
+ packages/SystemUI/AndroidManifest.xml         |  13 ++
+ packages/SystemUI/res/values/flags.xml        |   2 +
+ .../systemui/dagger/SystemUIModule.java       |   5 +
+ .../KeyguardMediaViewController.kt            | 104 +++++++++++++
+ .../KeyguardSmartspaceStartable.kt            |  35 +++++
+ .../KeyguardZenAlarmViewController.kt         | 141 ++++++++++++++++++
+ .../dagger/SmartspaceGoogleModule.java        |  25 ++++
+ .../dagger/SmartspaceStartableModule.kt       |  30 ++++
+ 9 files changed, 356 insertions(+)
+ create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
+ create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
+ create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
+ create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java
+ create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt
+
+diff --git a/packages/SystemUI/Android.bp b/packages/SystemUI/Android.bp
+index 7c8b683d2d6d..513512d80642 100644
+--- a/packages/SystemUI/Android.bp
++++ b/packages/SystemUI/Android.bp
+@@ -540,6 +540,7 @@ android_library {
+         "kairos",
+         "displaylib",
+         "aconfig_settings_flags_lib",
++        "bcsmartspace-google",
+     ],
+     manifest: "AndroidManifest.xml",
+     libs: [
+diff --git a/packages/SystemUI/AndroidManifest.xml b/packages/SystemUI/AndroidManifest.xml
+index 73b77979cd91..6c3f4bc5849c 100644
+--- a/packages/SystemUI/AndroidManifest.xml
++++ b/packages/SystemUI/AndroidManifest.xml
+@@ -407,6 +407,16 @@
+     <protected-broadcast android:name="com.android.systemui.action.ACTION_LAUNCH_MEDIA_OUTPUT_BROADCAST_DIALOG" />
+     <protected-broadcast android:name="com.android.systemui.STARTED" />
+
++    <!-- Smartspace -->
++    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
++    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL"/>
++    <permission android:name="com.android.systemui.permission.SEND_ALERT_BROADCASTS" android:protectionLevel="preinstalled|signature"/>
++    <uses-permission android:name="com.google.android.deskclock.permission.RECEIVE_ALERT_BROADCASTS"/>
++    <uses-permission android:name="com.google.android.apps.nexuslauncher.permission.QSB"/>
++    <protected-broadcast android:name="com.google.android.systemui.smartspace.CLICK_EVENT"/>
++    <protected-broadcast android:name="com.google.android.systemui.smartspace.ENABLE_UPDATE"/>
++    <protected-broadcast android:name="com.google.android.systemui.smartspace.EXPIRE_EVENT"/>
++
+     <application
+         android:name=".SystemUIApplication"
+         android:persistent="true"
+@@ -1077,7 +1087,8 @@
+         <provider android:name=".keyguard.KeyguardSliceProvider"
+                   android:authorities="com.android.systemui.keyguard"
+                   android:grantUriPermissions="true"
+-                  android:exported="true">
++                  android:exported="true"
++                  android:enabled="false">
+         </provider>
+
+         <receiver
+diff --git a/packages/SystemUI/res/values/flags.xml b/packages/SystemUI/res/values/flags.xml
+index 07a40c86d03a..5d80b46f65a4 100644
+--- a/packages/SystemUI/res/values/flags.xml
++++ b/packages/SystemUI/res/values/flags.xml
+@@ -30,6 +30,8 @@
+
+     <bool name="flag_charging_ripple">false</bool>
+
++    <bool name="flag_smartspace">true</bool>
++
+     <!--  Whether the user switcher chip shows in the status bar. When true, the multi user
+       avatar will no longer show on the lockscreen -->
+     <bool name="flag_user_switcher_chip">false</bool>
+diff --git a/packages/SystemUI/src/com/android/systemui/dagger/SystemUIModule.java b/packages/SystemUI/src/com/android/systemui/dagger/SystemUIModule.java
+index 38c456f03c72..6a5e4e46daeb 100644
+--- a/packages/SystemUI/src/com/android/systemui/dagger/SystemUIModule.java
++++ b/packages/SystemUI/src/com/android/systemui/dagger/SystemUIModule.java
+@@ -176,6 +176,9 @@
+ import com.android.systemui.wmshell.BubblesManager;
+ import com.android.wm.shell.bubbles.Bubbles;
+
++import com.google.android.systemui.smartspace.dagger.SmartspaceGoogleModule;
++import com.google.android.systemui.smartspace.dagger.SmartspaceStartableModule;
++
+ import dagger.Binds;
+ import dagger.BindsOptionalOf;
+ import dagger.Module;
+@@ -236,6 +239,8 @@
+         ScreenBrightnessModule.class,
+         SettingsModule.class,
+         SettingsProviderModule.class,
++        SmartspaceGoogleModule.class,
++        SmartspaceStartableModule.class,
+         StatusBarPipelineModule.class,
+         SysUIConcurrencyModule.class,
+         SysUICoroutinesModule.class,
+diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
+new file mode 100644
+index 000000000000..c57630739a8c
+--- /dev/null
++++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
+@@ -0,0 +1,104 @@
++package com.google.android.systemui.smartspace
++
++import android.app.smartspace.SmartspaceAction
++import android.app.smartspace.SmartspaceTarget
++import android.content.ComponentName
++import android.content.Context
++import android.media.MediaMetadata
++import android.os.UserHandle
++import android.text.TextUtils
++import android.view.View
++
++import com.android.systemui.dagger.qualifiers.Main
++import com.android.systemui.dagger.SysUISingleton
++import com.android.systemui.media.NotificationMediaManager
++import com.android.systemui.plugins.BcSmartspaceDataPlugin
++import com.android.systemui.settings.UserTracker
++import com.android.systemui.util.concurrency.DelayableExecutor
++
++import com.android.systemui.bcsmartspace.R
++
++import javax.inject.Inject
++
++@SysUISingleton
++class KeyguardMediaViewController
++@Inject
++constructor(
++    val context: Context,
++    val mediaManager: NotificationMediaManager,
++    val plugin: BcSmartspaceDataPlugin,
++    val userTracker: UserTracker,
++    @Main val uiExecutor: DelayableExecutor
++) {
++    var title: CharSequence? = null
++    var artist: CharSequence? = null
++    var smartspaceView: BcSmartspaceDataPlugin.SmartspaceView? = null
++    lateinit var mediaComponent: ComponentName
++
++    val mediaListener =
++        object : NotificationMediaManager.MediaListener {
++            override fun onPrimaryMetadataOrStateChanged(metadata: MediaMetadata?, state: Int) {
++                uiExecutor.execute { updateMediaInfo(metadata, state) }
++            }
++        }
++
++    val attachStateChangeListener = object : View.OnAttachStateChangeListener {
++        override fun onViewAttachedToWindow(view: View) {
++            smartspaceView = view as? BcSmartspaceDataPlugin.SmartspaceView
++            mediaManager.addCallback(mediaListener)
++        }
++
++        override fun onViewDetachedFromWindow(view: View) {
++            smartspaceView = null
++            mediaManager.removeCallback(mediaListener)
++        }
++    }
++
++    private fun updateMediaInfo(metadata: MediaMetadata?, state: Int) {
++        if (!NotificationMediaManager.isPlayingState(state)) {
++            clearMedia()
++            return
++        }
++
++        val newTitle = metadata?.let {
++            it.getText(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
++                ?: it.getText(MediaMetadata.METADATA_KEY_TITLE)
++                ?: context.resources.getString(R.string.music_controls_no_title)
++        }
++
++        val newArtist = metadata?.getText(MediaMetadata.METADATA_KEY_ARTIST)
++
++        if (TextUtils.equals(title, newTitle) && TextUtils.equals(artist, newArtist)) {
++            return
++        }
++
++        title = newTitle
++        artist = newArtist
++
++        if (newTitle != null) {
++            if (!::mediaComponent.isInitialized) {
++                 mediaComponent = ComponentName(context, KeyguardMediaViewController::class.java)
++            }
++
++            val target = SmartspaceTarget.Builder("deviceMedia", mediaComponent, UserHandle.of(userTracker.userId))
++                .setFeatureType(SmartspaceTarget.FEATURE_MEDIA)
++                .setHeaderAction(
++                    SmartspaceAction.Builder("deviceMediaTitle", newTitle.toString())
++                        .setSubtitle(artist)
++                        .setIcon(mediaManager.getMediaIcon())
++                        .build()
++                ).build()
++
++            smartspaceView?.setMediaTarget(target) ?: clearMedia()
++        } else {
++            clearMedia()
++        }
++    }
++
++    private fun clearMedia() {
++        title = null
++        artist = null
++        smartspaceView?.setMediaTarget(null)
++    }
++}
+diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
+new file mode 100644
+index 000000000000..f6b7c8a9d0e1
+--- /dev/null
++++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
+@@ -0,0 +1,35 @@
++package com.google.android.systemui.smartspace
++
++import com.android.systemui.CoreStartable
++import com.android.systemui.util.InitializationChecker
++
++import javax.inject.Inject
++
++import kotlinx.coroutines.launch
++
++class KeyguardSmartspaceStartable
++@Inject
++constructor(
++    private val zenController: KeyguardZenAlarmViewController,
++    private val mediaController: KeyguardMediaViewController,
++    private val initializationChecker: InitializationChecker
++) : CoreStartable {
++
++    override fun start() {
++        if (initializationChecker.initializeComponents()) {
++            val datePlugin = zenController.datePlugin
++            if (datePlugin is BcSmartspaceDataProvider) {
++                datePlugin.addOnAttachStateChangeListener(zenController.attachStateChangeListener)
++            }
++
++            zenController.applicationScope.launch {
++                zenController.updateNextAlarm()
++            }
++
++            val mediaPlugin = mediaController.plugin
++            if (mediaPlugin is BcSmartspaceDataProvider) {
++                mediaPlugin.addOnAttachStateChangeListener(mediaController.attachStateChangeListener)
++            }
++        }
++    }
++}
+diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
+new file mode 100644
+index 000000000000..123456789abc
+--- /dev/null
++++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
+@@ -0,0 +1,141 @@
++package com.google.android.systemui.smartspace
++
++import android.app.ActivityManager
++import android.app.AlarmManager
++import android.content.Context
++import android.graphics.drawable.Drawable
++import android.os.Handler
++import android.text.format.DateFormat
++import android.view.View
++
++import com.android.systemui.dagger.SysUISingleton
++import com.android.systemui.dagger.qualifiers.Application
++import com.android.systemui.dagger.qualifiers.Background
++import com.android.systemui.dagger.qualifiers.Main
++import com.android.systemui.lifecycle.repeatWhenAttached
++import com.android.systemui.plugins.BcSmartspaceDataPlugin
++import com.android.systemui.statusbar.policy.NextAlarmController
++import com.android.systemui.statusbar.policy.NextAlarmControllerImpl
++import com.android.systemui.statusbar.policy.ZenModeController
++import com.android.systemui.statusbar.policy.domain.interactor.ZenModeInteractor
++import com.android.systemui.statusbar.policy.domain.model.ZenModeInfo
++
++import com.android.systemui.bcsmartspace.R
++
++import java.util.concurrent.TimeUnit
++
++import javax.inject.Inject
++
++import kotlinx.coroutines.CoroutineDispatcher
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++
++@SysUISingleton
++class KeyguardZenAlarmViewController
++@Inject
++constructor(
++    val context: Context,
++    val datePlugin: BcSmartspaceDataPlugin,
++    val zenModeController: ZenModeController,
++    val zenModeInteractor: ZenModeInteractor,
++    val alarmManager: AlarmManager,
++    val nextAlarmController: NextAlarmControllerImpl,
++    @Main val handler: Handler,
++    @Application val applicationScope: CoroutineScope,
++    @Background val bgDispatcher: CoroutineDispatcher,
++) {
++    lateinit var alarmImage: Drawable
++    val smartspaceViews = mutableSetOf<BcSmartspaceDataPlugin.SmartspaceView>()
++
++    private val nextAlarmCallback = NextAlarmController.NextAlarmChangeCallback {
++        applicationScope.launch { updateNextAlarm() }
++    }
++
++    private val showNextAlarm = AlarmManager.OnAlarmListener {
++        showAlarm(null)
++    }
++
++    val attachStateChangeListener = object : View.OnAttachStateChangeListener {
++        override fun onViewAttachedToWindow(view: View) {
++            val smartspaceView = view as? BcSmartspaceDataPlugin.SmartspaceView ?: return
++
++            if (!::alarmImage.isInitialized) {
++                 alarmImage = context.resources.getDrawable(R.drawable.ic_access_alarms_big, null)
++            }
++
++            if (smartspaceViews.add(smartspaceView)) {
++                view.repeatWhenAttached {
++                    zenModeInteractor.mainActiveMode.collect { modeInfo ->
++                        updateModeIcon(smartspaceView, modeInfo)
++                    }
++                }
++            }
++            if (smartspaceViews.size == 1) {
++                nextAlarmController.addCallback(nextAlarmCallback)
++            }
++            applicationScope.launch { updateNextAlarm() }
++        }
++
++        override fun onViewDetachedFromWindow(view: View) {
++            val smartspaceView = view as? BcSmartspaceDataPlugin.SmartspaceView ?: return
++            smartspaceViews.remove(smartspaceView)
++            if (smartspaceViews.isEmpty()) {
++                nextAlarmController.removeCallback(nextAlarmCallback)
++            }
++        }
++    }
++
++    suspend fun updateNextAlarm() {
++        applicationScope.launch {
++            alarmManager.cancel(showNextAlarm)
++            val nextAlarmTime = getNextAlarmTime()
++            if (nextAlarmTime > 0) {
++                val triggerTime = nextAlarmTime - TimeUnit.HOURS.toMillis(12L)
++                if (triggerTime > 0) {
++                    alarmManager.setExact(
++                        AlarmManager.RTC,
++                        triggerTime,
++                        "lock_screen_next_alarm",
++                        showNextAlarm,
++                        handler
++                    )
++                }
++            }
++            showAlarm(nextAlarmTime)
++        }
++    }
++
++    fun showAlarm(alarmTime: Long?): Job = applicationScope.launch {
++        val time = alarmTime ?: getNextAlarmTime()
++        val alarmString = if (time > 0 && time <= System.currentTimeMillis() + TimeUnit.HOURS.toMillis(12L)) {
++            val pattern = if (DateFormat.is24HourFormat(context, ActivityManager.getCurrentUser())) "HH:mm" else "h:mm"
++            DateFormat.format(pattern, time).toString()
++        } else null
++
++        smartspaceViews.forEach { view ->
++            if (alarmString != null) {
++                view.setNextAlarm(alarmImage, alarmString)
++            } else {
++                view.setNextAlarm(null, null)
++            }
++        }
++    }
++
++    private suspend fun getNextAlarmTime(): Long = withContext(bgDispatcher) {
++        val nextAlarm = alarmManager.getNextAlarmClock(ActivityManager.getCurrentUser())
++        nextAlarm?.triggerTime ?: 0L
++    }
++
++    fun updateModeIcon(view: BcSmartspaceDataPlugin.SmartspaceView, zenModeInfo: ZenModeInfo?) {
++        applicationScope.launch {
++            if (zenModeInfo != null) {
++                val description = context.getString(
++                    R.string.active_mode_content_description,
++                    zenModeInfo.name
++                )
++                view.setDnd(zenModeInfo.icon.drawable, description)
++            } else {
++                view.setDnd(null, null)
++            }
++        }
++    }
++}
+diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java
+new file mode 100644
+index 000000000000..abcdef123456
+--- /dev/null
++++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java
+@@ -0,0 +1,25 @@
++package com.google.android.systemui.smartspace.dagger;
++
++import com.android.systemui.dagger.SysUISingleton;
++import com.android.systemui.plugins.BcSmartspaceDataPlugin;
++
++import com.google.android.systemui.smartspace.BcSmartspaceDataProvider;
++import com.google.android.systemui.smartspace.WeatherSmartspaceDataProvider;
++
++import dagger.Module;
++import dagger.Provides;
++
++@Module
++public abstract class SmartspaceGoogleModule {
++    @Provides
++    @SysUISingleton
++    static BcSmartspaceDataPlugin provideBcSmartspaceDataPlugin() {
++        return new BcSmartspaceDataProvider();
++    }
++
++    @Provides
++    @SysUISingleton
++    static WeatherSmartspaceDataProvider provideDreamWeatherSmartspaceDataPlugin() {
++        return new WeatherSmartspaceDataProvider();
++    }
++}
+diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt
+new file mode 100644
+index 000000000000..1a2b3c4d5e6f
+--- /dev/null
++++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (C) 2025 auroraOSP
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.google.android.systemui.smartspace.dagger
++
++import com.android.systemui.CoreStartable
++import com.google.android.systemui.smartspace.KeyguardSmartspaceStartable
++import dagger.Binds
++import dagger.Module
++import dagger.multibindings.ClassKey
++import dagger.multibindings.IntoMap
++
++@Module
++interface SmartspaceStartableModule {
++    @Binds
++    @IntoMap
++    @ClassKey(KeyguardSmartspaceStartable::class)
++    fun bindKeyguardSmartspaceStartable(impl: KeyguardSmartspaceStartable): CoreStartable
++}
+--
+2.44.0

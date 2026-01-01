@@ -9,6 +9,8 @@ import android.os.UserHandle
 import android.text.TextUtils
 import android.view.View
 
+import com.android.systemui.dagger.qualifiers.Main
+import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.media.NotificationMediaManager
 import com.android.systemui.plugins.BcSmartspaceDataPlugin
 import com.android.systemui.settings.UserTracker
@@ -18,6 +20,7 @@ import com.android.systemui.bcsmartspace.R
 
 import javax.inject.Inject
 
+@SysUISingleton
 class KeyguardMediaViewController
 @Inject
 constructor(
@@ -25,7 +28,7 @@ constructor(
     val mediaManager: NotificationMediaManager,
     val plugin: BcSmartspaceDataPlugin,
     val userTracker: UserTracker,
-    val uiExecutor: DelayableExecutor
+    @Main val uiExecutor: DelayableExecutor
 ) {
     var title: CharSequence? = null
     var artist: CharSequence? = null
@@ -62,7 +65,7 @@ constructor(
                 ?: it.getText(MediaMetadata.METADATA_KEY_TITLE)
                 ?: context.resources.getString(R.string.music_controls_no_title)
         }
-        
+
         val newArtist = metadata?.getText(MediaMetadata.METADATA_KEY_ARTIST)
 
         if (TextUtils.equals(title, newTitle) && TextUtils.equals(artist, newArtist)) {
@@ -73,6 +76,14 @@ constructor(
         artist = newArtist
 
         if (newTitle != null) {
+            // Initialize mediaComponent if not already done.
+            // Note: The original code didn't init it in constructor, but used it.
+            // The original patch had: mediaComponent = new ComponentName(context, KeyguardMediaViewController.class);
+            // We should init it here or in init block.
+            if (!::mediaComponent.isInitialized) {
+                 mediaComponent = ComponentName(context, KeyguardMediaViewController::class.java)
+            }
+
             val target = SmartspaceTarget.Builder("deviceMedia", mediaComponent, UserHandle.of(userTracker.userId))
                 .setFeatureType(SmartspaceTarget.FEATURE_MEDIA)
                 .setHeaderAction(
