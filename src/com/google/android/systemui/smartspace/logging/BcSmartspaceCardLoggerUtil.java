@@ -3,123 +3,128 @@ package com.google.android.systemui.smartspace.logging;
 import android.app.smartspace.SmartspaceAction;
 import android.app.smartspace.SmartspaceTarget;
 import android.app.smartspace.uitemplatedata.BaseTemplateData;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
-import android.text.TextUtils;
+import android.os.Bundle;
+
+import com.android.systemui.smartspace.nano.SmartspaceProto;
+
 import com.google.android.systemui.smartspace.InstanceId;
-import com.google.android.systemui.smartspace.logging.BcSmartspaceCardMetadataLoggingInfo;
-import com.google.android.systemui.smartspace.logging.BcSmartspaceSubcardLoggingInfo;
+
 import java.util.ArrayList;
 import java.util.List;
 
-public final class BcSmartspaceCardLoggerUtil {
-    public static BcSmartspaceSubcardLoggingInfo createSubcardLoggingInfo(SmartspaceTarget smartspaceTarget) {
-        if (smartspaceTarget == null || smartspaceTarget.getBaseAction() == null || smartspaceTarget.getBaseAction().getExtras() == null || smartspaceTarget.getBaseAction().getExtras().isEmpty() || smartspaceTarget.getBaseAction().getExtras().getInt("subcardType", -1) == -1) {
-            return null;
-        }
-        SmartspaceAction baseAction = smartspaceTarget.getBaseAction();
-        int create = InstanceId.create(baseAction.getExtras().getString("subcardId"));
-        int i = baseAction.getExtras().getInt("subcardType");
-        BcSmartspaceCardMetadataLoggingInfo.Builder builder = new BcSmartspaceCardMetadataLoggingInfo.Builder();
-        builder.mInstanceId = create;
-        builder.mCardTypeId = i;
-        BcSmartspaceCardMetadataLoggingInfo bcSmartspaceCardMetadataLoggingInfo = new BcSmartspaceCardMetadataLoggingInfo(builder);
-        ArrayList arrayList = new ArrayList();
-        arrayList.add(bcSmartspaceCardMetadataLoggingInfo);
-        BcSmartspaceSubcardLoggingInfo.Builder builder2 = new BcSmartspaceSubcardLoggingInfo.Builder();
-        builder2.mSubcards = arrayList;
-        builder2.mClickedSubcardIndex = 0;
-        return new BcSmartspaceSubcardLoggingInfo(builder2);
+public abstract class BcSmartspaceCardLoggerUtil {
+    public static boolean containsValidTemplateType(BaseTemplateData data) {
+        return (data == null || data.getTemplateType() == 0 || data.getTemplateType() == 8) ? false : true;
     }
 
-    public static int getUid(PackageManager packageManager, SmartspaceTarget smartspaceTarget) {
-        int i = -1;
-        if (packageManager != null) {
-            i = -1;
-            if (smartspaceTarget != null) {
-                i = -1;
-                if (smartspaceTarget.getComponentName() != null) {
-                    i = -1;
-                    if (!TextUtils.isEmpty(smartspaceTarget.getComponentName().getPackageName())) {
-                        if ("package_name".equals(smartspaceTarget.getComponentName().getPackageName())) {
-                            i = -1;
-                        } else {
-                            try {
-                                ApplicationInfo applicationInfo = packageManager.getApplicationInfo(smartspaceTarget.getComponentName().getPackageName(), PackageManager.ApplicationInfoFlags.of(0L));
-                                i = -1;
-                                if (applicationInfo != null) {
-                                    i = applicationInfo.uid;
-                                }
-                            } catch (PackageManager.NameNotFoundException e) {
-                                i = -1;
-                            }
-                        }
-                    }
+    public static SmartspaceProto.SmartspaceCardDimensionalInfo createDimensionalLoggingInfo(BaseTemplateData data) {
+        if (data == null || data.getPrimaryItem() == null || data.getPrimaryItem().getTapAction() == null) {
+            return null;
+        }
+
+        Bundle extras = data.getPrimaryItem().getTapAction().getExtras();
+        List<SmartspaceProto.SmartspaceFeatureDimension> dimensions = new ArrayList<>();
+
+        if (extras != null && !extras.isEmpty()) {
+            ArrayList<Integer> ids = extras.getIntegerArrayList("ss_card_dimension_ids");
+            ArrayList<Integer> values = extras.getIntegerArrayList("ss_card_dimension_values");
+            if (ids != null && values != null && ids.size() == values.size()) {
+                for (int i = 0; i < ids.size(); i++) {
+                    SmartspaceProto.SmartspaceFeatureDimension dimension = new SmartspaceProto.SmartspaceFeatureDimension();
+                    dimension.featureDimensionId = ids.get(i);
+                    dimension.featureDimensionValue = values.get(i);
+                    dimensions.add(dimension);
                 }
             }
         }
-        return i;
+
+        if (dimensions.isEmpty()) {
+            return null;
+        }
+
+        SmartspaceProto.SmartspaceCardDimensionalInfo info = new SmartspaceProto.SmartspaceCardDimensionalInfo();
+        info.featureDimensions = dimensions.toArray(new SmartspaceProto.SmartspaceFeatureDimension[dimensions.size()]);
+        return info;
     }
 
-    public static void createSubcardLoggingInfoHelper(ArrayList arrayList, BaseTemplateData.SubItemInfo subItemInfo) {
+    public static BcSmartspaceSubcardLoggingInfo createSubcardLoggingInfo(SmartspaceTarget target) {
+        if (target.getBaseAction() == null || target.getBaseAction().getExtras() == null || target.getBaseAction().getExtras().isEmpty() || target.getBaseAction().getExtras().getInt("subcardType", -1) == -1) {
+            return null;
+        }
+
+        int instanceId = InstanceId.create(target.getBaseAction().getExtras().getString("subcardId"));
+        int cardTypeId = target.getBaseAction().getExtras().getInt("subcardType");
+
+        BcSmartspaceCardMetadataLoggingInfo.Builder builder =
+                new BcSmartspaceCardMetadataLoggingInfo.Builder();
+        builder.mInstanceId = instanceId;
+        builder.mCardTypeId = cardTypeId;
+
+        BcSmartspaceCardMetadataLoggingInfo metadata =
+                new BcSmartspaceCardMetadataLoggingInfo(builder);
+        List<BcSmartspaceCardMetadataLoggingInfo> subcards = new ArrayList<>();
+        subcards.add(metadata);
+
+        BcSmartspaceSubcardLoggingInfo subcardInfo = new BcSmartspaceSubcardLoggingInfo();
+        subcardInfo.mSubcards = subcards;
+        subcardInfo.mClickedSubcardIndex = 0;
+        return subcardInfo;
+    }
+
+    public static void createSubcardLoggingInfoHelper(
+            List<BcSmartspaceCardMetadataLoggingInfo> subcards,
+            BaseTemplateData.SubItemInfo subItemInfo) {
         if (subItemInfo != null && subItemInfo.getLoggingInfo() != null) {
             BaseTemplateData.SubItemLoggingInfo loggingInfo = subItemInfo.getLoggingInfo();
-            BcSmartspaceCardMetadataLoggingInfo.Builder builder = new BcSmartspaceCardMetadataLoggingInfo.Builder();
+            BcSmartspaceCardMetadataLoggingInfo.Builder builder =
+                    new BcSmartspaceCardMetadataLoggingInfo.Builder();
             builder.mCardTypeId = loggingInfo.getFeatureType();
             builder.mInstanceId = loggingInfo.getInstanceId();
-            arrayList.add(new BcSmartspaceCardMetadataLoggingInfo(builder));
+            subcards.add(new BcSmartspaceCardMetadataLoggingInfo(builder));
         }
     }
 
-    public static boolean tryForcePrimaryFeatureType(BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo) {
-        if (bcSmartspaceCardLoggingInfo.mFeatureType != 1) {
-            return false;
+    public static void tryForcePrimaryFeatureTypeOrUpdateLogInfoFromTemplateData(BcSmartspaceCardLoggingInfo loggingInfo, BaseTemplateData data) {
+        if (loggingInfo.mFeatureType == 1) {
+            loggingInfo.mFeatureType = 39;
+            loggingInfo.mInstanceId = InstanceId.create("date_card_794317_92634");
+            return;
         }
-        bcSmartspaceCardLoggingInfo.mFeatureType = 39;
-        bcSmartspaceCardLoggingInfo.mInstanceId = InstanceId.create("date_card_794317_92634");
-        return true;
-    }
-
-    public static void tryForcePrimaryFeatureTypeAndInjectWeatherSubcard(BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo, SmartspaceTarget smartspaceTarget) {
-        if (tryForcePrimaryFeatureType(bcSmartspaceCardLoggingInfo) && smartspaceTarget != null && !"date_card_794317_92634".equals(smartspaceTarget.getSmartspaceTargetId())) {
-            if (bcSmartspaceCardLoggingInfo.mSubcardInfo == null) {
-                BcSmartspaceSubcardLoggingInfo.Builder builder = new BcSmartspaceSubcardLoggingInfo.Builder();
-                builder.mClickedSubcardIndex = 0;
-                builder.mSubcards = new ArrayList();
-                bcSmartspaceCardLoggingInfo.mSubcardInfo = new BcSmartspaceSubcardLoggingInfo(builder);
-            }
-            BcSmartspaceSubcardLoggingInfo bcSmartspaceSubcardLoggingInfo = bcSmartspaceCardLoggingInfo.mSubcardInfo;
-            if (bcSmartspaceSubcardLoggingInfo.mSubcards == null) {
-                bcSmartspaceSubcardLoggingInfo.mSubcards = new ArrayList();
-            }
-            if (bcSmartspaceCardLoggingInfo.mSubcardInfo.mSubcards.size() == 0 || (bcSmartspaceCardLoggingInfo.mSubcardInfo.mSubcards.get(0) != null && bcSmartspaceCardLoggingInfo.mSubcardInfo.mSubcards.get(0).mCardTypeId != 1)) {
-                List<BcSmartspaceCardMetadataLoggingInfo> list = bcSmartspaceCardLoggingInfo.mSubcardInfo.mSubcards;
-                BcSmartspaceCardMetadataLoggingInfo.Builder builder2 = new BcSmartspaceCardMetadataLoggingInfo.Builder();
-                builder2.mInstanceId = InstanceId.create(smartspaceTarget);
-                builder2.mCardTypeId = 1;
-                list.add(0, new BcSmartspaceCardMetadataLoggingInfo(builder2));
-                BcSmartspaceSubcardLoggingInfo bcSmartspaceSubcardLoggingInfo2 = bcSmartspaceCardLoggingInfo.mSubcardInfo;
-                int i = bcSmartspaceSubcardLoggingInfo2.mClickedSubcardIndex;
-                if (i > 0) {
-                    bcSmartspaceSubcardLoggingInfo2.mClickedSubcardIndex = i + 1;
-                }
-            }
+        if (data == null || data.getPrimaryItem() == null || data.getPrimaryItem().getLoggingInfo() == null) {
+            return;
+        }
+        int featureType = data.getPrimaryItem().getLoggingInfo().getFeatureType();
+        if (featureType > 0) {
+            loggingInfo.mFeatureType = featureType;
+        }
+        int instanceId = data.getPrimaryItem().getLoggingInfo().getInstanceId();
+        if (instanceId > 0) {
+            loggingInfo.mInstanceId = instanceId;
         }
     }
 
-    public static BcSmartspaceSubcardLoggingInfo createSubcardLoggingInfo(BaseTemplateData baseTemplateData) {
-        if (baseTemplateData == null) {
+    public static BcSmartspaceSubcardLoggingInfo createSubcardLoggingInfo(BaseTemplateData data) {
+        if (data == null) {
             return null;
         }
-        ArrayList arrayList = new ArrayList();
-        createSubcardLoggingInfoHelper(arrayList, baseTemplateData.getSubtitleItem());
-        createSubcardLoggingInfoHelper(arrayList, baseTemplateData.getSubtitleSupplementalItem());
-        createSubcardLoggingInfoHelper(arrayList, baseTemplateData.getSupplementalLineItem());
-        if (arrayList.isEmpty()) {
+
+        List<BcSmartspaceCardMetadataLoggingInfo> subcards = new ArrayList<>();
+
+        if (data.getPrimaryItem() != null && data.getPrimaryItem().getLoggingInfo() != null && data.getPrimaryItem().getLoggingInfo().getFeatureType() == 1) {
+            createSubcardLoggingInfoHelper(subcards, data.getPrimaryItem());
+        }
+
+        createSubcardLoggingInfoHelper(subcards, data.getSubtitleItem());
+        createSubcardLoggingInfoHelper(subcards, data.getSubtitleSupplementalItem());
+        createSubcardLoggingInfoHelper(subcards, data.getSupplementalLineItem());
+
+        if (subcards.isEmpty()) {
             return null;
         }
-        BcSmartspaceSubcardLoggingInfo.Builder builder = new BcSmartspaceSubcardLoggingInfo.Builder();
-        builder.mSubcards = arrayList;
-        return new BcSmartspaceSubcardLoggingInfo(builder);
+
+        BcSmartspaceSubcardLoggingInfo subcardInfo = new BcSmartspaceSubcardLoggingInfo();
+        subcardInfo.mSubcards = subcards;
+        subcardInfo.mClickedSubcardIndex = 0;
+        return subcardInfo;
     }
 }

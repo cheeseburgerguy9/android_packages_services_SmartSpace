@@ -11,19 +11,27 @@ import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+
 import com.android.internal.graphics.ColorUtils;
-import com.android.systemui.bcsmartspace.R;
 import com.android.systemui.plugins.BcSmartspaceDataPlugin;
 import com.android.systemui.plugins.FalsingManager;
+
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLogger;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLoggingInfo;
-import com.google.android.systemui.smartspace.utils.DateSmartspaceViewUtil;
 
+import com.android.systemui.bcsmartspace.R;
+
+import java.lang.invoke.VarHandle;
+
+/* compiled from: go/retraceme af8e0b46c0cb0ee2c99e9b6d0c434e5c0b686fd9230eaab7fb9a40e3a9d0cf6f */
+/* loaded from: classes2.dex */
 public class DateSmartspaceView extends LinearLayout implements BcSmartspaceDataPlugin.SmartspaceView {
-    public static final boolean DEBUG = Log.isLoggable("DateSmartspaceView", 3);
+    public static final boolean DEBUG = Log.isLoggable("DateSmartspaceView", Log.DEBUG);
     public final ContentObserver mAodSettingsObserver;
+    public Handler mBgHandler;
     public int mCurrentTextColor;
     public BcSmartspaceDataPlugin mDataProvider;
     public final SmartspaceAction mDateAction;
@@ -39,245 +47,236 @@ public class DateSmartspaceView extends LinearLayout implements BcSmartspaceData
     public DoubleShadowTextView mNextAlarmTextView;
     public int mPrimaryTextColor;
     public String mUiSurface;
-    public Handler mBgHandler;
 
     public DateSmartspaceView(Context context) {
         this(context, null);
     }
 
-    @Override // android.view.ViewGroup, android.view.View
+    @Override
     public final void onAttachedToWindow() {
-        DateSmartspaceViewUtil dateSmartspaceViewUtil;
+        Handler handler;
         super.onAttachedToWindow();
-        if (TextUtils.equals(this.mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
-            boolean z = false;
+        if (TextUtils.equals(mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
             try {
-                getContext().getContentResolver().registerContentObserver(Settings.Secure.getUriFor("doze_always_on"), false, this.mAodSettingsObserver, -1);
+                handler = mBgHandler;
             } catch (Exception e) {
                 Log.w("DateSmartspaceView", "Unable to register DOZE_ALWAYS_ON content observer: ", e);
             }
-            Context context = getContext();
-            if (Settings.Secure.getIntForUser(context.getContentResolver(), "doze_always_on", 0, context.getUserId()) == 1) {
-                z = true;
+            if (mBgHandler == null) {
+                throw new IllegalStateException("Must set background handler to avoid making binder calls on main thread");
             }
-            this.mIsAodEnabled = z;
+            mBgHandler.post(() -> {
+                getContext().getContentResolver().registerContentObserver(
+                        Settings.Secure.getUriFor("doze_always_on"), 
+                        false, 
+                        mAodSettingsObserver, 
+                        -1);
+            });
+            mIsAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
         }
-        BcSmartspaceCardLoggingInfo.Builder builder = new BcSmartspaceCardLoggingInfo.Builder();
-        builder.mInstanceId = InstanceId.create(this.mDateTarget);
-        builder.mFeatureType = this.mDateTarget.getFeatureType();
-        builder.mDisplaySurface = BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface);
-        getContext().getPackageManager();
-        builder.mUid = -1;
-        BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo = new BcSmartspaceCardLoggingInfo(builder);
-        this.mLoggingInfo = bcSmartspaceCardLoggingInfo;
-        IcuDateTextView icuDateTextView = this.mDateView;
-        SmartspaceTarget smartspaceTarget = this.mDateTarget;
-        SmartspaceAction smartspaceAction = this.mDateAction;
-        BcSmartspaceDataPlugin bcSmartspaceDataPlugin = this.mDataProvider;
-        if (bcSmartspaceDataPlugin == null) {
-            dateSmartspaceViewUtil = null;
-        } else {
-            dateSmartspaceViewUtil = new DateSmartspaceViewUtil(bcSmartspaceDataPlugin, 2);
-        }
-        BcSmartSpaceUtil.setOnClickListener(icuDateTextView, smartspaceTarget, smartspaceAction, dateSmartspaceViewUtil, "DateSmartspaceView", bcSmartspaceCardLoggingInfo);
+        BcSmartspaceCardLoggingInfo.Builder builder =
+                new BcSmartspaceCardLoggingInfo.Builder()
+                        .setInstanceId(InstanceId.create(mDateTarget))
+                        .setFeatureType(mDateTarget.getFeatureType())
+                        .setDisplaySurface(
+                                BcSmartSpaceUtil.getLoggingDisplaySurface(mUiSurface, mDozeAmount))
+                        .setUid(-1);
+        mLoggingInfo = new BcSmartspaceCardLoggingInfo(builder);
+        BcSmartSpaceUtil.setOnClickListener(mDateView, mDateTarget, mDateAction, mDataProvider != null ? mDataProvider.getEventNotifier() : null, "DateSmartspaceView", mLoggingInfo, 0);
     }
 
-    @Override // android.view.ViewGroup, android.view.View
+    @Override
     public final void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        getContext().getContentResolver().unregisterContentObserver(this.mAodSettingsObserver);
+        if (mBgHandler == null) {
+            throw new IllegalStateException("Must set background handler to avoid making binder calls on main thread");
+        }
+        mBgHandler.post(() -> {
+            getContext().getContentResolver().unregisterContentObserver(mAodSettingsObserver);
+        });
     }
 
-    @Override // android.view.View
+    @Override
     public final void onFinishInflate() {
         super.onFinishInflate();
-        this.mDateView = (IcuDateTextView) findViewById(R.id.date);
-        this.mNextAlarmTextView = (DoubleShadowTextView) findViewById(R.id.alarm_text_view);
-        this.mDndImageView = (ImageView) findViewById(R.id.dnd_icon);
+        mDateView = findViewById(R.id.date);
+        mNextAlarmTextView = findViewById(R.id.alarm_text_view);
+        mDndImageView = findViewById(R.id.dnd_icon);
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void registerDataProvider(BcSmartspaceDataPlugin bcSmartspaceDataPlugin) {
-        this.mDataProvider = bcSmartspaceDataPlugin;
+    @Override
+    public final void registerDataProvider(BcSmartspaceDataPlugin dataProvider) {
+        mDataProvider = dataProvider;
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setDnd(Drawable drawable, String str) {
-        if (drawable == null) {
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mDndImageView, 8);
+    @Override
+    public final void setBgHandler(Handler handler) {
+        mBgHandler = handler;
+        mDateView.mBgHandler = handler;
+    }
+
+    @Override
+    public final void setDnd(Drawable image, String description) {
+        if (image == null) {
+            BcSmartspaceTemplateDataUtils.updateVisibility(mDndImageView, View.GONE);
         } else {
-            this.mDndIconDrawable.setIcon(drawable.mutate());
-            this.mDndImageView.setImageDrawable(this.mDndIconDrawable);
-            this.mDndImageView.setContentDescription(str);
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mDndImageView, 0);
+            mDndIconDrawable.setIcon(image.mutate());
+            mDndImageView.setImageDrawable(mDndIconDrawable);
+            mDndImageView.setContentDescription(description);
+            BcSmartspaceTemplateDataUtils.updateVisibility(mDndImageView, View.VISIBLE);
         }
         updateColorForExtras();
     }
 
+    /* JADX DEBUG: Don't trust debug lines info. Lines numbers was adjusted: min line is 1 */
     @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setDozeAmount(float f) {
-        this.mDozeAmount = f;
-        int blendARGB = ColorUtils.blendARGB(this.mPrimaryTextColor, -1, f);
-        this.mCurrentTextColor = blendARGB;
-        this.mDateView.setTextColor(blendARGB);
+    public final void setDozeAmount(float dozeAmount) {
+        int loggingSurface;
+        mDozeAmount = dozeAmount;
+        mCurrentTextColor = ColorUtils.blendARGB(mPrimaryTextColor, -1, dozeAmount);
+        mDateView.setTextColor(mCurrentTextColor);
         updateColorForExtras();
-        if (this.mLoggingInfo == null) {
+        if (mLoggingInfo == null || (loggingSurface = BcSmartSpaceUtil.getLoggingDisplaySurface(mUiSurface, mDozeAmount)) == -1) {
             return;
         }
-        int loggingDisplaySurface = BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface);
-        if (loggingDisplaySurface == -1) {
-            return;
-        }
-        if (loggingDisplaySurface == 3 && !this.mIsAodEnabled) {
-            return;
-        }
-        if (DEBUG) {
-            Log.d("DateSmartspaceView", "@" + Integer.toHexString(hashCode()) + ", setDozeAmount: Logging SMARTSPACE_CARD_SEEN, loggingSurface = " + loggingDisplaySurface);
-        }
-        BcSmartspaceCardLoggingInfo.Builder builder = new BcSmartspaceCardLoggingInfo.Builder();
-        BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo = this.mLoggingInfo;
-        builder.mInstanceId = bcSmartspaceCardLoggingInfo.mInstanceId;
-        builder.mFeatureType = bcSmartspaceCardLoggingInfo.mFeatureType;
-        builder.mDisplaySurface = loggingDisplaySurface;
-        builder.mUid = bcSmartspaceCardLoggingInfo.mUid;
-        BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo2 = new BcSmartspaceCardLoggingInfo(builder);
-        BcSmartspaceEvent bcSmartspaceEvent = BcSmartspaceEvent.SMARTSPACE_CARD_SEEN;
-        BcSmartspaceCardLogger.log(bcSmartspaceEvent, bcSmartspaceCardLoggingInfo2);
-        if (this.mNextAlarmData.mImage != null) {
-            BcSmartspaceCardLoggingInfo.Builder builder2 = new BcSmartspaceCardLoggingInfo.Builder();
-            builder2.mInstanceId = InstanceId.create("upcoming_alarm_card_94510_12684");
-            builder2.mFeatureType = 23;
-            builder2.mDisplaySurface = loggingDisplaySurface;
-            builder2.mUid = this.mLoggingInfo.mUid;
-            BcSmartspaceCardLogger.log(bcSmartspaceEvent, new BcSmartspaceCardLoggingInfo(builder2));
+        if (loggingSurface != 3 || mIsAodEnabled) {
+            if (DEBUG) {
+                Log.d("DateSmartspaceView", "@" + Integer.toHexString(hashCode()) + ", setDozeAmount: Logging SMARTSPACE_CARD_SEEN, loggingSurface = " + loggingSurface);
+            }
+            BcSmartspaceCardLoggingInfo.Builder builder =
+                    new BcSmartspaceCardLoggingInfo.Builder()
+                            .setInstanceId(mLoggingInfo.mInstanceId)
+                            .setFeatureType(mLoggingInfo.mFeatureType)
+                            .setDisplaySurface(loggingSurface)
+                            .setUid(mLoggingInfo.mUid);
+            BcSmartspaceCardLogger.log(
+                    BcSmartspaceEvent.SMARTSPACE_CARD_SEEN, new BcSmartspaceCardLoggingInfo(builder));
+            if (mNextAlarmData.mImage != null) {
+                BcSmartspaceCardLoggingInfo.Builder alarmBuilder =
+                        new BcSmartspaceCardLoggingInfo.Builder()
+                                .setInstanceId(InstanceId.create("upcoming_alarm_card_94510_12684"))
+                                .setFeatureType(23)
+                                .setDisplaySurface(loggingSurface)
+                                .setUid(mLoggingInfo.mUid);
+                BcSmartspaceCardLogger.log(
+                        BcSmartspaceEvent.SMARTSPACE_CARD_SEEN,
+                        new BcSmartspaceCardLoggingInfo(alarmBuilder));
+            }
         }
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
+    @Override
     public final void setFalsingManager(FalsingManager falsingManager) {
         BcSmartSpaceUtil.sFalsingManager = falsingManager;
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setIntentStarter(BcSmartspaceDataPlugin.IntentStarter intentStarter) {
-        BcSmartSpaceUtil.sIntentStarter = intentStarter;
-    }
-
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setNextAlarm(Drawable drawable, String str) {
-        DateSmartspaceViewUtil dateSmartspaceViewUtil0;
-        DateSmartspaceViewUtil dateSmartspaceViewUtil1;
-        BcNextAlarmData bcNextAlarmData = this.mNextAlarmData;
-        bcNextAlarmData.mImage = drawable;
-        if (drawable != null) {
-            drawable.mutate();
+    @Override
+    public final void setNextAlarm(Drawable image, String description) {
+        mNextAlarmData.mImage = image;
+        if (image != null) {
+            image.mutate();
         }
-        bcNextAlarmData.mDescription = str;
-        if (this.mNextAlarmData.mImage == null) {
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mNextAlarmTextView, 8);
+        mNextAlarmData.mDescription = description;
+        if (mNextAlarmData.mImage == null) {
+            BcSmartspaceTemplateDataUtils.updateVisibility(mNextAlarmTextView, View.GONE);
         } else {
-            this.mNextAlarmTextView.setContentDescription(getContext().getString(2131951778, str));
-            this.mNextAlarmTextView.setText(this.mNextAlarmData.getDescription(null));
-            DoubleShadowIconDrawable doubleShadowIconDrawable = this.mNextAlarmIconDrawable;
-            Drawable drawable2 = this.mNextAlarmData.mImage;
-            int dimensionPixelSize = getContext().getResources().getDimensionPixelSize(2131165881);
-            drawable2.setBounds(0, 0, dimensionPixelSize, dimensionPixelSize);
-            doubleShadowIconDrawable.setIcon(drawable2);
-            this.mNextAlarmTextView.setCompoundDrawablesRelative(this.mNextAlarmIconDrawable, null, null, null);
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mNextAlarmTextView, 0);
-            BcNextAlarmData bcNextAlarmData2 = this.mNextAlarmData;
-            DoubleShadowTextView doubleShadowTextView = this.mNextAlarmTextView;
-            BcSmartspaceDataPlugin bcSmartspaceDataPlugin = this.mDataProvider;
-            if (bcSmartspaceDataPlugin == null) {
-                dateSmartspaceViewUtil0 = null;
-            } else {
-                dateSmartspaceViewUtil0 = new DateSmartspaceViewUtil(bcSmartspaceDataPlugin, 0);
-            }
-            bcNextAlarmData2.setOnClickListener(doubleShadowTextView, null, dateSmartspaceViewUtil0, BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface));
-            BcNextAlarmData bcNextAlarmData3 = this.mNextAlarmData;
-            DoubleShadowTextView doubleShadowTextView2 = this.mNextAlarmTextView;
-            BcSmartspaceDataPlugin bcSmartspaceDataPlugin2 = this.mDataProvider;
-            if (bcSmartspaceDataPlugin2 == null) {
-                dateSmartspaceViewUtil1 = null;
-            } else {
-                dateSmartspaceViewUtil1 = new DateSmartspaceViewUtil(bcSmartspaceDataPlugin2, 1);
-            }
-            bcNextAlarmData3.setOnClickListener(doubleShadowTextView2, null, dateSmartspaceViewUtil1, BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface));
+            mNextAlarmTextView.setContentDescription(getContext().getString(R.string.accessibility_next_alarm, description));
+            String displayText = TextUtils.isEmpty(null) ? mNextAlarmData.mDescription : mNextAlarmData.mDescription + " · null";
+            mNextAlarmTextView.setText(displayText);
+            int iconSize = getContext().getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_size);
+            mNextAlarmData.mImage.setBounds(0, 0, iconSize, iconSize);
+            mNextAlarmIconDrawable.setIcon(mNextAlarmData.mImage);
+            mNextAlarmTextView.setCompoundDrawablesRelative(mNextAlarmIconDrawable, null, null, null);
+            BcSmartspaceTemplateDataUtils.updateVisibility(mNextAlarmTextView, View.VISIBLE);
+            BcSmartspaceDataPlugin.SmartspaceEventNotifier eventNotifier = mDataProvider == null ? null : mDataProvider.getEventNotifier();
+            int loggingSurface = BcSmartSpaceUtil.getLoggingDisplaySurface(mUiSurface, mDozeAmount);
+            BcSmartspaceCardLoggingInfo loggingInfo = new BcSmartspaceCardLoggingInfo.Builder()
+                    .setInstanceId(InstanceId.create("upcoming_alarm_card_94510_12684"))
+                    .setFeatureType(23)
+                    .setDisplaySurface(loggingSurface)
+                    .build();
+            BcSmartSpaceUtil.setOnClickListener(mNextAlarmTextView, null, BcNextAlarmData.SHOW_ALARMS_ACTION, eventNotifier, "BcNextAlarmData", loggingInfo, 0);
         }
         updateColorForExtras();
-    }
-
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setPrimaryTextColor(int i) {
-        this.mPrimaryTextColor = i;
-        int blendARGB = ColorUtils.blendARGB(i, -1, this.mDozeAmount);
-        this.mCurrentTextColor = blendARGB;
-        this.mDateView.setTextColor(blendARGB);
-        updateColorForExtras();
-    }
-
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setUiSurface(String str) {
-        if (!isAttachedToWindow()) {
-            this.mUiSurface = str;
-            if (TextUtils.equals(str, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
-                this.mDateView.setUpdatesOnAod();
-                return;
-            }
-            return;
-        }
-        throw new IllegalStateException("Must call before attaching view to window.");
     }
 
     @Override
-    public void setBgHandler(Handler handler) {
-        this.mBgHandler = handler;
+    public final void setPrimaryTextColor(int color) {
+        mPrimaryTextColor = color;
+        mCurrentTextColor = ColorUtils.blendARGB(color, -1, mDozeAmount);
+        mDateView.setTextColor(mCurrentTextColor);
+        updateColorForExtras();
+    }
+
+    @Override
+    public final void setScreenOn(boolean screenOn) {
+        if (mDateView != null) {
+            mDateView.mIsInteractive = screenOn;
+            mDateView.rescheduleTicker();
+        }
+    }
+
+    @Override
+    public final void setTimeChangedDelegate(BcSmartspaceDataPlugin.TimeChangedDelegate delegate) {
+        if (mDateView != null) {
+            if (mDateView.isAttachedToWindow()) {
+                throw new IllegalStateException("Must call before attaching view to window.");
+            }
+            mDateView.mTimeChangedDelegate = delegate;
+        }
+    }
+
+    @Override
+    public final void setUiSurface(String uiSurface) {
+        if (isAttachedToWindow()) {
+            throw new IllegalStateException("Must call before attaching view to window.");
+        }
+        mUiSurface = uiSurface;
+        if (TextUtils.equals(uiSurface, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
+            if (mDateView.isAttachedToWindow()) {
+                throw new IllegalStateException("Must call before attaching view to window.");
+            }
+            mDateView.mUpdatesOnAod = true;
+        }
     }
 
     public final void updateColorForExtras() {
-        DoubleShadowTextView doubleShadowTextView = this.mNextAlarmTextView;
-        if (doubleShadowTextView != null) {
-            doubleShadowTextView.setTextColor(this.mCurrentTextColor);
-            this.mNextAlarmIconDrawable.setTint(this.mCurrentTextColor);
+        if (mNextAlarmTextView != null) {
+            mNextAlarmTextView.setTextColor(mCurrentTextColor);
+            mNextAlarmIconDrawable.setTint(mCurrentTextColor);
         }
-        ImageView imageView = this.mDndImageView;
-        if (imageView != null && imageView.getDrawable() != null) {
-            imageView.getDrawable().setTint(this.mCurrentTextColor);
-            imageView.invalidate();
+        if (mDndImageView == null || mDndImageView.getDrawable() == null) {
+            return;
         }
+        mDndImageView.getDrawable().setTint(mCurrentTextColor);
+        mDndImageView.invalidate();
     }
 
-    public DateSmartspaceView(Context context, AttributeSet attributeSet) {
-        this(context, attributeSet, 0);
+    public DateSmartspaceView(Context context, AttributeSet attrs) {
+        this(context, attrs, 0);
     }
 
     /* JADX WARN: Type inference failed for: r4v10, types: [com.google.android.systemui.smartspace.DateSmartspaceView$1] */
-    public DateSmartspaceView(Context context, AttributeSet attributeSet, int i) {
-        super(context, attributeSet, i);
-        this.mUiSurface = null;
-        this.mDozeAmount = 0.0f;
-        this.mDateTarget = new SmartspaceTarget.Builder("date_card_794317_92634", new ComponentName(getContext(), getClass()), getContext().getUser()).setFeatureType(1).build();
-        this.mDateAction = new SmartspaceAction.Builder("dateId", "Date").setIntent(BcSmartSpaceUtil.getOpenCalendarIntent()).build();
-        this.mNextAlarmData = new BcNextAlarmData();
-        this.mAodSettingsObserver = new ContentObserver(new Handler()) { // from class: com.google.android.systemui.smartspace.DateSmartspaceView.1
+    public DateSmartspaceView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        mUiSurface = null;
+        mDozeAmount = 0.0f;
+        mDateTarget = new SmartspaceTarget.Builder("date_card_794317_92634", new ComponentName(getContext(), getClass()), getContext().getUser()).setFeatureType(1).build();
+        mDateAction = new SmartspaceAction.Builder("dateId", "Date").setIntent(BcSmartSpaceUtil.getOpenCalendarIntent()).build();
+        mNextAlarmData = new BcNextAlarmData();
+        mAodSettingsObserver = new ContentObserver(new Handler()) { // from class: com.google.android.systemui.smartspace.DateSmartspaceView.1
+            /* JADX DEBUG: Don't trust debug lines info. Lines numbers was adjusted: min line is 1 */
             @Override // android.database.ContentObserver
-            public final void onChange(boolean z) {
-                DateSmartspaceView dateSmartspaceView = DateSmartspaceView.this;
-                boolean z2 = DateSmartspaceView.DEBUG;
-                Context context2 = dateSmartspaceView.getContext();
-                boolean z3 = false;
-                if (Settings.Secure.getIntForUser(context2.getContentResolver(), "doze_always_on", 0, context2.getUserId()) == 1) {
-                    z3 = true;
-                }
-                DateSmartspaceView dateSmartspaceView2 = DateSmartspaceView.this;
-                if (dateSmartspaceView2.mIsAodEnabled == z3) {
+            public final void onChange(boolean selfChange) {
+                boolean isAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
+                if (mIsAodEnabled == isAodEnabled) {
                     return;
                 }
-                dateSmartspaceView2.mIsAodEnabled = z3;
+                mIsAodEnabled = isAodEnabled;
             }
         };
-        context.getTheme().applyStyle(2132017751, false);
-        this.mNextAlarmIconDrawable = new DoubleShadowIconDrawable(context);
-        this.mDndIconDrawable = new DoubleShadowIconDrawable(context);
+        context.getTheme().applyStyle(R.style.Smartspace, false);
+        mNextAlarmIconDrawable = new DoubleShadowIconDrawable(context);
+        mDndIconDrawable = new DoubleShadowIconDrawable(context);
     }
 }

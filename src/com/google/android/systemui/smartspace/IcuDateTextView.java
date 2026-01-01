@@ -8,157 +8,187 @@ import android.database.ContentObserver;
 import android.icu.text.DateFormat;
 import android.icu.text.DisplayContext;
 import android.os.Handler;
-import android.os.PowerManager;
-import android.provider.Settings;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.widget.TextView;
+
+import com.android.systemui.plugins.BcSmartspaceDataPlugin;
+
 import com.android.systemui.bcsmartspace.R;
+
 import java.util.Locale;
 import java.util.Objects;
 
 public class IcuDateTextView extends DoubleShadowTextView {
+    private static final String TAG = "IcuDateTextView";
     public final ContentObserver mAodSettingsObserver;
+    public Handler mBgHandler;
     public DateFormat mFormatter;
     public Handler mHandler;
     public final BroadcastReceiver mIntentReceiver;
     public boolean mIsAodEnabled;
-    public boolean mIsInteractive;
+    public Boolean mIsInteractive;
     public String mText;
-    public final Runnable mTicker;
+    public final Runnable mTimeChangedCallback;
+    public BcSmartspaceDataPlugin.TimeChangedDelegate mTimeChangedDelegate;
     public boolean mUpdatesOnAod;
+
+    public final class DefaultTimeChangedDelegate implements BcSmartspaceDataPlugin.TimeChangedDelegate, Runnable {
+        public Handler mHandler;
+        public Runnable mTimeChangedCallback;
+
+        @Override
+        public final void register(Runnable callback) {
+            if (mTimeChangedCallback != null) {
+                unregister();
+            }
+            mTimeChangedCallback = callback;
+            run();
+        }
+
+        @Override
+        public final void run() {
+            if (mTimeChangedCallback != null) {
+                mTimeChangedCallback.run();
+                if (mHandler != null) {
+                    long now = SystemClock.uptimeMillis();
+                    long delay = 60000 - (now % 60000);
+                    mHandler.postAtTime(this, now + delay);
+                }
+            }
+        }
+
+        @Override
+        public final void unregister() {
+            mHandler.removeCallbacks(this);
+            mTimeChangedCallback = null;
+        }
+    }
 
     public IcuDateTextView(Context context) {
         this(context, null);
     }
 
-    public IcuDateTextView(Context context, AttributeSet attributeSet) {
-        super(context, attributeSet, 0);
-        this.mAodSettingsObserver = new ContentObserver(new Handler()) { // from class: com.google.android.systemui.smartspace.IcuDateTextView.1
-            @Override // android.database.ContentObserver
-            public final void onChange(boolean z) {
-                IcuDateTextView icuDateTextView = IcuDateTextView.this;
-                Context context2 = icuDateTextView.getContext();
-                boolean z2 = false;
-                if (Settings.Secure.getIntForUser(context2.getContentResolver(), "doze_always_on", 0, context2.getUserId()) == 1) {
-                    z2 = true;
-                }
-                IcuDateTextView icuDateTextView2 = IcuDateTextView.this;
-                if (icuDateTextView2.mIsAodEnabled == z2) {
-                    return;
-                }
-                icuDateTextView2.mIsAodEnabled = z2;
-                icuDateTextView2.rescheduleTicker();
-            }
-        };
-        this.mTicker = this::onTimeTick;
-        this.mIntentReceiver = new BroadcastReceiver() { // from class: com.google.android.systemui.smartspace.IcuDateTextView.1
-            @Override // android.content.BroadcastReceiver
-            public final void onReceive(Context context2, Intent intent) {
-                if (intent.getAction().equals("android.intent.action.SCREEN_ON")) {
-                    IcuDateTextView icuDateTextView = IcuDateTextView.this;
-                    icuDateTextView.mIsInteractive = true;
-                    icuDateTextView.rescheduleTicker();
-                } else if (intent.getAction().equals("android.intent.action.SCREEN_OFF")) {
-                    IcuDateTextView icuDateTextView2 = IcuDateTextView.this;
-                    icuDateTextView2.mIsInteractive = false;
-                    icuDateTextView2.rescheduleTicker();
-                } else {
-                    IcuDateTextView icuDateTextView3 = IcuDateTextView.this;
-                    icuDateTextView3.onTimeChanged(!"android.intent.action.TIME_TICK".equals(intent.getAction()));
-                }
-            }
-        };
-    }
-
-    @Override // android.widget.TextView, android.view.View
-    protected void onAttachedToWindow() {
+    @Override
+    public final void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (this.mUpdatesOnAod) {
-            boolean z = false;
+
+        if (mUpdatesOnAod) {
             try {
-                getContext().getContentResolver().registerContentObserver(Settings.Secure.getUriFor("doze_always_on"), false, this.mAodSettingsObserver, -1);
+                if (mBgHandler == null) {
+                    Log.wtf(TAG, "Must set background handler when mUpdatesOnAod is set to avoid making binder calls on main thread");
+                    getContext().getContentResolver().registerContentObserver(Settings.Secure.getUriFor("doze_always_on"), false, mAodSettingsObserver, -1);
+                } else {
+                    mBgHandler.post(() -> getContext().getContentResolver().registerContentObserver(
+                            Settings.Secure.getUriFor("doze_always_on"), false, mAodSettingsObserver, -1));
+                }
             } catch (Exception e) {
-                Log.w("IcuDateTextView", "Unable to register DOZE_ALWAYS_ON content observer: ", e);
+                Log.w(TAG, "Unable to register DOZE_ALWAYS_ON content observer: ", e);
             }
-            Context context = getContext();
-            if (Settings.Secure.getIntForUser(context.getContentResolver(), "doze_always_on", 0, context.getUserId()) == 1) {
-                z = true;
-            }
-            this.mIsAodEnabled = z;
+            mIsAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
         }
-        this.mHandler = new Handler();
+
+        mHandler = new Handler();
         IntentFilter intentFilter = new IntentFilter();
-        intentFilter.addAction("android.intent.action.TIME_SET");
-        intentFilter.addAction("android.intent.action.TIMEZONE_CHANGED");
-        intentFilter.addAction("android.intent.action.SCREEN_ON");
-        intentFilter.addAction("android.intent.action.SCREEN_OFF");
-        getContext().registerReceiver(this.mIntentReceiver, intentFilter);
-        this.mIsInteractive = ((PowerManager) getContext().getSystemService(PowerManager.class)).isInteractive();
+        intentFilter.addAction("Intent.ACTION_TIME_CHANGED");
+        intentFilter.addAction("Intent.ACTION_TIMEZONE_CHANGED");
+
+        if (mBgHandler == null) {
+            Log.w(TAG, "mBgHandler is not set! Fallback to make binder calls on main thread.");
+            getContext().registerReceiver(mIntentReceiver, intentFilter, Context.RECEIVER_EXPORTED);
+        } else {
+            mBgHandler.post(() -> getContext().registerReceiver(mIntentReceiver, intentFilter, Context.RECEIVER_EXPORTED));
+        }
+
+        if (mTimeChangedDelegate == null) {
+            DefaultTimeChangedDelegate delegate = new DefaultTimeChangedDelegate();
+            delegate.mHandler = mHandler;
+            mTimeChangedDelegate = delegate;
+        }
         onTimeChanged(true);
     }
 
-    @Override // android.view.View
-    protected void onDetachedFromWindow() {
+    @Override
+    public final void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        if (this.mHandler != null) {
-            getContext().unregisterReceiver(this.mIntentReceiver);
-            this.mHandler = null;
+        if (mHandler != null) {
+            if (mBgHandler == null) {
+                Log.w(TAG, "mBgHandler is not set! Fallback to make binder calls on main thread.");
+                getContext().unregisterReceiver(mIntentReceiver);
+            } else {
+                mBgHandler.post(() -> {
+                    try {
+                        getContext().unregisterReceiver(mIntentReceiver);
+                    } catch (IllegalArgumentException ignored) {}
+                });
+            }
+            mTimeChangedDelegate.unregister();
+            mHandler = null;
         }
-        if (this.mUpdatesOnAod) {
-            getContext().getContentResolver().unregisterContentObserver(this.mAodSettingsObserver);
+        if (mUpdatesOnAod) {
+            if (mBgHandler == null) {
+                Log.wtf(TAG, "Must set background handler when mUpdatesOnAod is set to avoid making binder calls on main thread");
+                getContext().getContentResolver().unregisterContentObserver(mAodSettingsObserver);
+            } else {
+                mBgHandler.post(() -> getContext().getContentResolver().unregisterContentObserver(mAodSettingsObserver));
+            }
         }
     }
 
-    private void onTimeTick() {
-        onTimeChanged(false);
-        if (this.mHandler != null) {
-            long uptimeMillis = SystemClock.uptimeMillis();
-            this.mHandler.postAtTime(this.mTicker, uptimeMillis + (1000 - (uptimeMillis % 1000)));
+    public final void onTimeChanged(boolean forceUpdateFormatter) {
+        if (mFormatter == null || forceUpdateFormatter) {
+            mFormatter = DateFormat.getInstanceForSkeleton(getContext().getString(R.string.smartspace_icu_date_pattern), Locale.getDefault());
+            mFormatter.setContext(DisplayContext.CAPITALIZATION_FOR_BEGINNING_OF_SENTENCE);
         }
-    }
-
-    public final void rescheduleTicker() {
-        Handler handler = this.mHandler;
-        if (handler == null) {
+        String newText = mFormatter.format(Long.valueOf(System.currentTimeMillis()));
+        if (Objects.equals(mText, newText)) {
             return;
         }
-        handler.removeCallbacks(this.mTicker);
-        if ((!this.mIsInteractive && (!this.mUpdatesOnAod || !this.mIsAodEnabled)) || !isAggregatedVisible()) {
-            return;
-        }
-        this.mTicker.run();
+        mText = newText;
+        setText(newText);
+        setContentDescription(newText);
     }
 
-    public final void setUpdatesOnAod() {
-        if (!isAttachedToWindow()) {
-            this.mUpdatesOnAod = true;
-            return;
-        }
-        throw new IllegalStateException("Must call before attaching view to window.");
-    }
-
-    @Override // android.view.View
-    public void onVisibilityAggregated(boolean isVisible) {
+    @Override
+    public final void onVisibilityAggregated(boolean isVisible) {
         super.onVisibilityAggregated(isVisible);
         rescheduleTicker();
     }
 
-    public void onTimeChanged(boolean force) {
-        if (!isShown()) {
+    public final void rescheduleTicker() {
+        if (mHandler == null) {
             return;
         }
-        if (this.mFormatter == null || force) {
-            DateFormat format = DateFormat.getInstanceForSkeleton(getContext().getString(R.string.smartspace_icu_date_pattern), Locale.getDefault());
-            this.mFormatter = format;
-            format.setContext(DisplayContext.CAPITALIZATION_FOR_BEGINNING_OF_SENTENCE);
+        mTimeChangedDelegate.unregister();
+        if ((mIsInteractive == null || mIsInteractive || (mUpdatesOnAod && mIsAodEnabled)) && isAggregatedVisible()) {
+            mTimeChangedDelegate.register(mTimeChangedCallback);
         }
-        String format2 = this.mFormatter.format(Long.valueOf(System.currentTimeMillis()));
-        if (!Objects.equals(this.mText, format2)) {
-            this.mText = format2;
-            setText(format2);
-            setContentDescription(format2);
-        }
+    }
+
+    public IcuDateTextView(Context context, AttributeSet attrs) {
+        super(context, attrs, 0);
+
+        mAodSettingsObserver = new ContentObserver(new Handler()) {
+            @Override
+            public void onChange(boolean selfChange) {
+                boolean isAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
+                if (mIsAodEnabled == isAodEnabled) {
+                    return;
+                }
+                mIsAodEnabled = isAodEnabled;
+                rescheduleTicker();
+            }
+        };
+
+        mIntentReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                boolean updateFormatter = "android.intent.action.TIMEZONE_CHANGED".equals(intent.getAction()) || "android.intent.action.TIME_SET".equals(intent.getAction());
+                onTimeChanged(updateFormatter);
+            }
+        };
+
+        mTimeChangedCallback = () -> onTimeChanged(false);
     }
 }
