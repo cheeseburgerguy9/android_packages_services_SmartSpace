@@ -16,12 +16,12 @@ Change-Id: Ibcsmartspace00000000000000000000000000000000
  packages/SystemUI/AndroidManifest.xml         |  13 ++
  packages/SystemUI/res/values/flags.xml        |   2 +
  .../systemui/dagger/SystemUIModule.java       |   5 +
- .../KeyguardMediaViewController.kt            | 104 +++++++++++++
+ .../KeyguardMediaViewController.kt            | 107 +++++++++++++
  .../KeyguardSmartspaceStartable.kt            |  35 +++++
- .../KeyguardZenAlarmViewController.kt         | 141 ++++++++++++++++++
+ .../KeyguardZenAlarmViewController.kt         | 145 ++++++++++++++++++
  .../dagger/SmartspaceGoogleModule.java        |  25 ++++
- .../dagger/SmartspaceStartableModule.kt       |  30 ++++
- 9 files changed, 356 insertions(+)
+ .../dagger/SmartspaceStartableModule.kt       |  32 ++++
+ 9 files changed, 365 insertions(+)
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
  create mode 100644 packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
@@ -109,10 +109,10 @@ index 38c456f03c72..6a5e4e46daeb 100644
          SysUICoroutinesModule.class,
 diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
 new file mode 100644
-index 000000000000..c57630739a8c
+index 000000000000..000000000000
 --- /dev/null
 +++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardMediaViewController.kt
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,107 @@
 +package com.google.android.systemui.smartspace
 +
 +import android.app.smartspace.SmartspaceAction
@@ -191,6 +191,10 @@ index 000000000000..c57630739a8c
 +        artist = newArtist
 +
 +        if (newTitle != null) {
++            // Initialize mediaComponent if not already done.
++            // Note: The original code didn't init it in constructor, but used it.
++            // The original patch had: mediaComponent = new ComponentName(context, KeyguardMediaViewController.class);
++            // We should init it here or in init block.
 +            if (!::mediaComponent.isInitialized) {
 +                 mediaComponent = ComponentName(context, KeyguardMediaViewController::class.java)
 +            }
@@ -218,7 +222,7 @@ index 000000000000..c57630739a8c
 +}
 diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
 new file mode 100644
-index 000000000000..f6b7c8a9d0e1
+index 000000000000..000000000000
 --- /dev/null
 +++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardSmartspaceStartable.kt
 @@ -0,0 +1,35 @@
@@ -259,10 +263,10 @@ index 000000000000..f6b7c8a9d0e1
 +}
 diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
 new file mode 100644
-index 000000000000..123456789abc
+index 000000000000..000000000000
 --- /dev/null
 +++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/KeyguardZenAlarmViewController.kt
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,145 @@
 +package com.google.android.systemui.smartspace
 +
 +import android.app.ActivityManager
@@ -326,6 +330,7 @@ index 000000000000..123456789abc
 +        override fun onViewAttachedToWindow(view: View) {
 +            val smartspaceView = view as? BcSmartspaceDataPlugin.SmartspaceView ?: return
 +
++            // Lazy init resources
 +            if (!::alarmImage.isInitialized) {
 +                 alarmImage = context.resources.getDrawable(R.drawable.ic_access_alarms_big, null)
 +            }
@@ -409,7 +414,7 @@ index 000000000000..123456789abc
 +}
 diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java
 new file mode 100644
-index 000000000000..abcdef123456
+index 000000000000..000000000000
 --- /dev/null
 +++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceGoogleModule.java
 @@ -0,0 +1,25 @@
@@ -440,10 +445,10 @@ index 000000000000..abcdef123456
 +}
 diff --git a/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt
 new file mode 100644
-index 000000000000..1a2b3c4d5e6f
+index 000000000000..000000000000
 --- /dev/null
 +++ b/packages/SystemUI/src/com/google/android/systemui/smartspace/dagger/SmartspaceStartableModule.kt
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,32 @@
 +/*
 + * Copyright (C) 2025 auroraOSP
 + *
