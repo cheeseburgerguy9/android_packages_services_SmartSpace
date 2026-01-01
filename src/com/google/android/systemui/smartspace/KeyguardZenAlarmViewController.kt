@@ -8,12 +8,15 @@ import android.os.Handler
 import android.text.format.DateFormat
 import android.view.View
 
+import com.android.systemui.dagger.SysUISingleton
+import com.android.systemui.dagger.qualifiers.Application
+import com.android.systemui.dagger.qualifiers.Background
+import com.android.systemui.dagger.qualifiers.Main
 import com.android.systemui.lifecycle.repeatWhenAttached
 import com.android.systemui.plugins.BcSmartspaceDataPlugin
 import com.android.systemui.statusbar.policy.NextAlarmController
 import com.android.systemui.statusbar.policy.NextAlarmControllerImpl
 import com.android.systemui.statusbar.policy.ZenModeController
-import com.android.systemui.statusbar.policy.ZenModeControllerImpl
 import com.android.systemui.statusbar.policy.domain.interactor.ZenModeInteractor
 import com.android.systemui.statusbar.policy.domain.model.ZenModeInfo
 
@@ -29,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@SysUISingleton
 class KeyguardZenAlarmViewController
 @Inject
 constructor(
@@ -38,9 +42,9 @@ constructor(
     val zenModeInteractor: ZenModeInteractor,
     val alarmManager: AlarmManager,
     val nextAlarmController: NextAlarmControllerImpl,
-    val handler: Handler,
-    val applicationScope: CoroutineScope,
-    val bgDispatcher: CoroutineDispatcher,
+    @Main val handler: Handler,
+    @Application val applicationScope: CoroutineScope,
+    @Background val bgDispatcher: CoroutineDispatcher,
 ) {
     lateinit var alarmImage: Drawable
     val smartspaceViews = mutableSetOf<BcSmartspaceDataPlugin.SmartspaceView>()
@@ -56,6 +60,12 @@ constructor(
     val attachStateChangeListener = object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(view: View) {
             val smartspaceView = view as? BcSmartspaceDataPlugin.SmartspaceView ?: return
+
+            // Lazy init resources
+            if (!::alarmImage.isInitialized) {
+                 alarmImage = context.resources.getDrawable(R.drawable.ic_access_alarms_big, null)
+            }
+
             if (smartspaceViews.add(smartspaceView)) {
                 view.repeatWhenAttached {
                     zenModeInteractor.mainActiveMode.collect { modeInfo ->
@@ -114,11 +124,6 @@ constructor(
         }
     }
 
-    //private suspend fun getNextAlarmTime(): Long = withContext(bgDispatcher) {
-    //    val zenControllerImpl = zenModeController as? ZenModeControllerImpl ?: return@withContext 0L
-    //    zenControllerImpl.mAlarmManager.getNextAlarmClock(zenControllerImpl.mUserId)?.triggerTime ?: 0L
-    //}
-
     private suspend fun getNextAlarmTime(): Long = withContext(bgDispatcher) {
         val nextAlarm = alarmManager.getNextAlarmClock(ActivityManager.getCurrentUser())
         nextAlarm?.triggerTime ?: 0L
@@ -128,7 +133,7 @@ constructor(
         applicationScope.launch {
             if (zenModeInfo != null) {
                 val description = context.getString(
-                    R.string.active_mode_content_description, 
+                    R.string.active_mode_content_description,
                     zenModeInfo.name
                 )
                 view.setDnd(zenModeInfo.icon.drawable, description)

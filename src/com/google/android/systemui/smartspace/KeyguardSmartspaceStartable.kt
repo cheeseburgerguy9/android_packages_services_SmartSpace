@@ -17,17 +17,19 @@ constructor(
 
     override fun start() {
         if (initializationChecker.initializeComponents()) {
-            zenController.datePlugin.addOnAttachStateChangeListener(
-                zenController.attachStateChangeListener
-            )
+            val datePlugin = zenController.datePlugin
+            if (datePlugin is BcSmartspaceDataProvider) {
+                datePlugin.addOnAttachStateChangeListener(zenController.attachStateChangeListener)
+            }
 
             zenController.applicationScope.launch { 
                 zenController.updateNextAlarm() 
             }
 
-            mediaController.plugin.addOnAttachStateChangeListener(
-                mediaController.attachStateChangeListener
-            )
+            val mediaPlugin = mediaController.plugin
+            if (mediaPlugin is BcSmartspaceDataProvider) {
+                mediaPlugin.addOnAttachStateChangeListener(mediaController.attachStateChangeListener)
+            }
         }
     }
 }
