@@ -30,7 +30,7 @@ constructor(
     var title: CharSequence? = null
     var artist: CharSequence? = null
     var smartspaceView: BcSmartspaceDataPlugin.SmartspaceView? = null
-    lateinit var mediaComponent: ComponentName
+    var mediaComponent: ComponentName = ComponentName(context, KeyguardMediaViewController::class.java)
 
     val mediaListener =
         object : NotificationMediaManager.MediaListener {
@@ -62,7 +62,7 @@ constructor(
                 ?: it.getText(MediaMetadata.METADATA_KEY_TITLE)
                 ?: context.resources.getString(R.string.music_controls_no_title)
         }
-        
+
         val newArtist = metadata?.getText(MediaMetadata.METADATA_KEY_ARTIST)
 
         if (TextUtils.equals(title, newTitle) && TextUtils.equals(artist, newArtist)) {

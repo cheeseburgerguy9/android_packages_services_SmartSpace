@@ -14,19 +14,17 @@
  * limitations under the License.
  */
 
-package com.google.android.systemui.smartspace.dagger
+package com.google.android.systemui.smartspace
+    .dagger
 
-import com.android.systemui.CoreStartable
-import com.google.android.systemui.smartspace.KeyguardSmartspaceStartable
-import dagger.Binds
-import dagger.Module
-import dagger.multibindings.ClassKey
-import dagger.multibindings.IntoMap
+        import com.android.systemui.CoreStartable import com.google.android
+    .systemui.smartspace.KeyguardSmartspaceStartable import
+        dagger.Binds import dagger.Module import
+            dagger.multibindings.ClassKey import dagger.multibindings.IntoMap
 
-@Module
-interface SmartspaceStartableModule {
-    @Binds
-    @IntoMap
-    @ClassKey(KeyguardSmartspaceStartable::class)
-    fun bindKeyguardSmartspaceStartable(impl: KeyguardSmartspaceStartable): CoreStartable
+    @Module interface SmartspaceStartableModule {
+  @Binds @IntoMap @ClassKey(KeyguardSmartspaceStartable::class) fun
+  bindKeyguardSmartspaceStartable(impl
+                                  : KeyguardSmartspaceStartable)
+      : CoreStartable
 }
