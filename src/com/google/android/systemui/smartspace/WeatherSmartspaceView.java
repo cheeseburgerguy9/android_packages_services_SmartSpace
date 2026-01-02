@@ -2,30 +2,40 @@ package com.google.android.systemui.smartspace;
 
 import android.app.smartspace.SmartspaceAction;
 import android.app.smartspace.SmartspaceTarget;
-import android.app.smartspace.SmartspaceTargetEvent;
+import android.app.smartspace.SmartspaceUtils;
+import android.app.smartspace.uitemplatedata.BaseTemplateData;
+import android.app.smartspace.uitemplatedata.Icon;
+import android.app.smartspace.uitemplatedata.TapAction;
+import android.app.smartspace.uitemplatedata.Text;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.database.ContentObserver;
 import android.os.Handler;
+import android.os.Parcelable;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.View;
-import android.widget.FrameLayout;
-import com.android.systemui.bcsmartspace.R;
+import android.widget.LinearLayout;
+
 import com.android.internal.graphics.ColorUtils;
 import com.android.systemui.plugins.BcSmartspaceDataPlugin;
 import com.android.systemui.plugins.FalsingManager;
+
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLogger;
+import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLoggerUtil;
 import com.google.android.systemui.smartspace.logging.BcSmartspaceCardLoggingInfo;
 import com.google.android.systemui.smartspace.utils.ContentDescriptionUtil;
-import java.util.List;
-import java.util.Objects;
 
-public class WeatherSmartspaceView extends FrameLayout implements BcSmartspaceDataPlugin.SmartspaceTargetListener, BcSmartspaceDataPlugin.SmartspaceView {
-    public static final boolean DEBUG = Log.isLoggable("WeatherSmartspaceView", 3);
+import com.android.systemui.bcsmartspace.R;
+
+import java.util.List;
+
+public class WeatherSmartspaceView extends LinearLayout implements BcSmartspaceDataPlugin.SmartspaceTargetListener, BcSmartspaceDataPlugin.SmartspaceView {
+    public static final boolean DEBUG = Log.isLoggable("WeatherSmartspaceView", Log.DEBUG);
     public final ContentObserver mAodSettingsObserver;
+    public Handler mBgHandler;
     public BcSmartspaceDataPlugin mDataProvider;
     public float mDozeAmount;
     public final DoubleShadowIconDrawable mIconDrawable;
@@ -37,199 +47,224 @@ public class WeatherSmartspaceView extends FrameLayout implements BcSmartspaceDa
     public final int mTextDescentExtraPadding;
     public String mUiSurface;
     public DoubleShadowTextView mView;
-    public Handler mBgHandler;
 
     public WeatherSmartspaceView(Context context) {
         this(context, null);
     }
 
-    @Override // android.view.ViewGroup, android.view.View
+    @Override
     public final void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (TextUtils.equals(this.mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
-            boolean z = false;
+        
+        if (TextUtils.equals(mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_LOCK_SCREEN_AOD)) {
             try {
-                getContext().getContentResolver().registerContentObserver(Settings.Secure.getUriFor("doze_always_on"), false, this.mAodSettingsObserver, -1);
+                if (mBgHandler == null) {
+                    throw new IllegalStateException("Must set background handler to avoid making binder calls on main thread");
+                }
+
+                mBgHandler.post(() -> {
+                    getContext().getContentResolver().registerContentObserver(
+                        Settings.Secure.getUriFor("doze_always_on"), 
+                        false, 
+                        mAodSettingsObserver, 
+                        -1
+                    );
+                });
             } catch (Exception e) {
                 Log.w("WeatherSmartspaceView", "Unable to register DOZE_ALWAYS_ON content observer: ", e);
             }
-            Context context = getContext();
-            if (Settings.Secure.getIntForUser(context.getContentResolver(), "doze_always_on", 0, context.getUserId()) == 1) {
-                z = true;
-            }
-            this.mIsAodEnabled = z;
+
+            mIsAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
+        }
+
+        if (mDataProvider != null) {
+            mDataProvider.registerListener(this);
         }
     }
 
-    @Override // android.view.ViewGroup, android.view.View
+    @Override
     public final void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        getContext().getContentResolver().unregisterContentObserver(this.mAodSettingsObserver);
-        BcSmartspaceDataPlugin bcSmartspaceDataPlugin = this.mDataProvider;
-        if (bcSmartspaceDataPlugin != null) {
-            bcSmartspaceDataPlugin.unregisterListener(this);
+        
+        if (mBgHandler == null) {
+            throw new IllegalStateException("Must set background handler to avoid making binder calls on main thread");
+        }
+
+        mBgHandler.post(() -> {
+            getContext().getContentResolver().unregisterContentObserver(mAodSettingsObserver);
+        });
+
+        if (mDataProvider != null) {
+            mDataProvider.unregisterListener(this);
         }
     }
 
-    @Override // android.view.View
+    @Override
     public final void onFinishInflate() {
         super.onFinishInflate();
-        this.mView = (DoubleShadowTextView) findViewById(R.id.weather_text_view);
+        mView = findViewById(R.id.weather_text_view);
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceTargetListener
-    public final void onSmartspaceTargetsUpdated(List list) {
-        SmartspaceAction headerAction;
-        DoubleShadowTextView doubleShadowTextView = this.mView;
-        if (list.size() > 1) {
+    @Override
+    public final void onSmartspaceTargetsUpdated(List<? extends Parcelable> targets) {
+        List<SmartspaceTarget> smartspaceTargets =
+                targets.stream()
+                        .filter(t -> t instanceof SmartspaceTarget)
+                        .map(t -> (SmartspaceTarget) t)
+                        .collect(java.util.stream.Collectors.toList());
+        if (smartspaceTargets.size() > 1) {
             return;
         }
-        if (list.isEmpty() && TextUtils.equals(this.mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_DREAM)) {
+        if (smartspaceTargets.isEmpty() && TextUtils.equals(mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_DREAM)) {
             return;
         }
-        if (list.isEmpty()) {
-            BcSmartspaceTemplateDataUtils.updateVisibility(this.mView, 8);
+        if (smartspaceTargets.isEmpty()) {
+            BcSmartspaceTemplateDataUtils.updateVisibility(mView, View.GONE);
             return;
         }
-        BcSmartspaceTemplateDataUtils.updateVisibility(this.mView, 0);
-        SmartspaceTarget smartspaceTarget = (SmartspaceTarget) list.get(0);
-        if (smartspaceTarget.getFeatureType() != 1 || (headerAction = smartspaceTarget.getHeaderAction()) == null) {
+        BcSmartspaceTemplateDataUtils.updateVisibility(mView, View.VISIBLE);
+        SmartspaceTarget target = smartspaceTargets.get(0);
+        if (target.getFeatureType() != 1) {
             return;
         }
-        CharSequence title = headerAction.getTitle();
-        this.mView.setText(title.toString());
-        ContentDescriptionUtil.setFormattedContentDescription("WeatherSmartspaceView", this.mView, title, headerAction.getContentDescription());
-        this.mIconDrawable.setIcon(BcSmartSpaceUtil.getIconDrawableWithCustomSize(headerAction.getIcon(), getContext(), this.mIconSize));
-        this.mView.setCompoundDrawablesRelative(this.mIconDrawable, null, null, null);
-        if (this.mRemoveTextDescent) {
-            this.mView.setPaddingRelative(0, 0, 0, this.mTextDescentExtraPadding - ((int) Math.floor(doubleShadowTextView.getPaint().getFontMetrics().descent)));
-        }
-        BcSmartspaceCardLoggingInfo.Builder builder = new BcSmartspaceCardLoggingInfo.Builder();
-        builder.mInstanceId = InstanceId.create(smartspaceTarget);
-        builder.mFeatureType = smartspaceTarget.getFeatureType();
-        builder.mDisplaySurface = BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface);
-        getContext().getPackageManager();
-        builder.mUid = -1;
-        this.mLoggingInfo = builder.build();
-        DoubleShadowTextView doubleShadowTextView2 = this.mView;
-        final BcSmartspaceDataPlugin bcSmartspaceDataPlugin = this.mDataProvider;
-        final BcSmartspaceDataPlugin.SmartspaceEventNotifier[] smartspaceEventNotifier = {null};
-        if (bcSmartspaceDataPlugin != null) {
-            Objects.requireNonNull(bcSmartspaceDataPlugin);
-            smartspaceEventNotifier[0] = new BcSmartspaceDataPlugin.SmartspaceEventNotifier() {
-                @Override
-                public void notifySmartspaceEvent(SmartspaceTargetEvent smartspaceTargetEvent) {
-                    smartspaceEventNotifier[0].notifySmartspaceEvent(smartspaceTargetEvent);
+        boolean hasValidTemplate = BcSmartspaceCardLoggerUtil.containsValidTemplateType(target.getTemplateData());
+        if (hasValidTemplate || target.getHeaderAction() != null) {
+            BcSmartspaceCardLoggingInfo.Builder builder =
+                    new BcSmartspaceCardLoggingInfo.Builder()
+                            .setInstanceId(InstanceId.create(target))
+                            .setFeatureType(target.getFeatureType())
+                            .setDisplaySurface(
+                                    BcSmartSpaceUtil.getLoggingDisplaySurface(mUiSurface, mDozeAmount))
+                            .setUid(-1)
+                            .setDimensionalInfo(
+                                    BcSmartspaceCardLoggerUtil.createDimensionalLoggingInfo(
+                                            target.getTemplateData()));
+            mLoggingInfo = new BcSmartspaceCardLoggingInfo(builder);
+            if (!hasValidTemplate) {
+                SmartspaceAction headerAction = target.getHeaderAction();
+                if (headerAction == null) {
+                    Log.d("WeatherSmartspaceView", "Passed-in header action is null");
+                } else {
+                    mView.setText(headerAction.getTitle().toString());
+                    mView.setCompoundDrawablesRelative(null, null, null, null);
+                    mIconDrawable.setIcon(BcSmartSpaceUtil.getIconDrawableWithCustomSize(headerAction.getIcon(), getContext(), mIconSize));
+                    mView.setCompoundDrawablesRelative(mIconDrawable, null, null, null);
+                    ContentDescriptionUtil.setFormattedContentDescription("WeatherSmartspaceView", mView, headerAction.getTitle(), headerAction.getContentDescription());
+                    if (!TextUtils.equals(mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_DREAM)) {
+                        BcSmartSpaceUtil.setOnClickListener(mView, target, headerAction, mDataProvider != null ? mDataProvider.getEventNotifier() : null, "WeatherSmartspaceView", mLoggingInfo, 0);
+                    }
                 }
-            };
+            } else if (target.getTemplateData() != null) {
+                BaseTemplateData.SubItemInfo subItemInfo = target.getTemplateData().getSubtitleItem();
+                if (subItemInfo == null) {
+                    Log.d("WeatherSmartspaceView", "Passed-in item info is null");
+                } else {
+                    BcSmartspaceTemplateDataUtils.setText(mView, subItemInfo.getText());
+                    mView.setCompoundDrawablesRelative(null, null, null, null);
+                    if (subItemInfo.getIcon() != null) {
+                        mIconDrawable.setIcon(BcSmartSpaceUtil.getIconDrawableWithCustomSize(subItemInfo.getIcon().getIcon(), getContext(), mIconSize));
+                        mView.setCompoundDrawablesRelative(mIconDrawable, null, null, null);
+                    }
+                    ContentDescriptionUtil.setFormattedContentDescription("WeatherSmartspaceView", mView, SmartspaceUtils.isEmpty(subItemInfo.getText()) ? "" : subItemInfo.getText().getText(), subItemInfo.getIcon() != null ? subItemInfo.getIcon().getContentDescription() : "");
+                    if (subItemInfo.getTapAction() != null && !TextUtils.equals(mUiSurface, BcSmartspaceDataPlugin.UI_SURFACE_DREAM)) {
+                        BcSmartSpaceUtil.setOnClickListener(mView, target, subItemInfo.getTapAction(), mDataProvider != null ? mDataProvider.getEventNotifier() : null, "WeatherSmartspaceView", mLoggingInfo, 0);
+                    }
+                }
+            }
+            if (mRemoveTextDescent) {
+                mView.setPaddingRelative(0, 0, 0, mTextDescentExtraPadding - ((int) Math.floor(mView.getPaint().getFontMetrics().descent)));
+            }
         }
-        BcSmartSpaceUtil.setOnClickListener((View) doubleShadowTextView2, smartspaceTarget, headerAction, smartspaceEventNotifier[0], "WeatherSmartspaceView", this.mLoggingInfo);
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void registerDataProvider(BcSmartspaceDataPlugin bcSmartspaceDataPlugin) {
-        BcSmartspaceDataPlugin bcSmartspaceDataPlugin2 = this.mDataProvider;
-        if (bcSmartspaceDataPlugin2 != null) {
-            bcSmartspaceDataPlugin2.unregisterListener(this);
+    @Override
+    public final void registerDataProvider(BcSmartspaceDataPlugin dataProvider) {
+        if (mDataProvider != null) {
+            mDataProvider.unregisterListener(this);
         }
-        this.mDataProvider = bcSmartspaceDataPlugin;
-        bcSmartspaceDataPlugin.registerListener(this);
+        mDataProvider = dataProvider;
+        if (isAttachedToWindow()) {
+            mDataProvider.registerListener(this);
+        }
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setDozeAmount(float f) {
-        this.mDozeAmount = f;
-        this.mView.setTextColor(ColorUtils.blendARGB(this.mPrimaryTextColor, -1, f));
-        if (this.mLoggingInfo == null) {
-            return;
-        }
-        int loggingDisplaySurface = BcSmartSpaceUtil.getLoggingDisplaySurface(this.mDozeAmount, this.mUiSurface);
-        if (loggingDisplaySurface == -1) {
-            return;
-        }
-        if (loggingDisplaySurface == 3 && !this.mIsAodEnabled) {
-            return;
-        }
-        BcSmartspaceCardLoggingInfo.Builder builder = new BcSmartspaceCardLoggingInfo.Builder();
-        BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo = this.mLoggingInfo;
-        builder.mInstanceId = bcSmartspaceCardLoggingInfo.mInstanceId;
-        builder.mFeatureType = bcSmartspaceCardLoggingInfo.mFeatureType;
-        builder.mDisplaySurface = loggingDisplaySurface;
-        builder.mUid = bcSmartspaceCardLoggingInfo.mUid;
-        BcSmartspaceCardLoggingInfo bcSmartspaceCardLoggingInfo2 = new BcSmartspaceCardLoggingInfo(builder);
-        if (DEBUG) {
-            Log.d("WeatherSmartspaceView", "@" + Integer.toHexString(hashCode()) + ", setDozeAmount: Logging SMARTSPACE_CARD_SEEN, loggingSurface = " + loggingDisplaySurface);
-        }
-        BcSmartspaceCardLogger.log(BcSmartspaceEvent.SMARTSPACE_CARD_SEEN, bcSmartspaceCardLoggingInfo2);
+    @Override
+    public final void setBgHandler(Handler handler) {
+        mBgHandler = handler;
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
+    @Override
+    public final void setDozeAmount(float dozeAmount) {
+        mDozeAmount = dozeAmount;
+        mView.setTextColor(ColorUtils.blendARGB(mPrimaryTextColor, -1, dozeAmount));
+        int loggingSurface = BcSmartSpaceUtil.getLoggingDisplaySurface(mUiSurface, mDozeAmount);
+        if (mLoggingInfo == null || loggingSurface == -1) {
+            return;
+        }
+        if (loggingSurface != 3 || mIsAodEnabled) {
+            if (DEBUG) {
+                Log.d("WeatherSmartspaceView", "@" + Integer.toHexString(hashCode()) + ", setDozeAmount: Logging SMARTSPACE_CARD_SEEN, loggingSurface = " + loggingSurface);
+            }
+
+            BcSmartspaceCardLoggingInfo.Builder builder =
+                    new BcSmartspaceCardLoggingInfo.Builder()
+                            .setInstanceId(mLoggingInfo.mInstanceId)
+                            .setFeatureType(mLoggingInfo.mFeatureType)
+                            .setDisplaySurface(loggingSurface)
+                            .setUid(mLoggingInfo.mUid);
+            BcSmartspaceCardLogger.log(
+                    BcSmartspaceEvent.SMARTSPACE_CARD_SEEN, new BcSmartspaceCardLoggingInfo(builder));
+        }
+    }
+
+    @Override
     public final void setFalsingManager(FalsingManager falsingManager) {
         BcSmartSpaceUtil.sFalsingManager = falsingManager;
     }
 
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setIntentStarter(BcSmartspaceDataPlugin.IntentStarter intentStarter) {
-        BcSmartSpaceUtil.sIntentStarter = intentStarter;
-    }
-
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setPrimaryTextColor(int i) {
-        this.mPrimaryTextColor = i;
-        this.mView.setTextColor(ColorUtils.blendARGB(i, -1, this.mDozeAmount));
-    }
-
-    @Override // com.android.systemui.plugins.BcSmartspaceDataPlugin.SmartspaceView
-    public final void setUiSurface(String str) {
-        if (!isAttachedToWindow()) {
-            this.mUiSurface = str;
-            return;
-        }
-        throw new IllegalStateException("Must call before attaching view to window.");
+    @Override
+    public final void setPrimaryTextColor(int color) {
+        mPrimaryTextColor = color;
+        mView.setTextColor(ColorUtils.blendARGB(color, -1, mDozeAmount));
     }
 
     @Override
-    public void setBgHandler(Handler handler) {
-        this.mBgHandler = handler;
+    public final void setUiSurface(String uiSurface) {
+        if (isAttachedToWindow()) {
+            throw new IllegalStateException("Must call before attaching view to window.");
+        }
+        mUiSurface = uiSurface;
     }
 
-    public WeatherSmartspaceView(Context context, AttributeSet attributeSet) {
-        this(context, attributeSet, 0);
+    public WeatherSmartspaceView(Context context, AttributeSet attrs) {
+        this(context, attrs, 0);
     }
 
-    /* JADX WARN: Type inference failed for: r6v2, types: [com.google.android.systemui.smartspace.WeatherSmartspaceView$1] */
-    public WeatherSmartspaceView(Context context, AttributeSet attributeSet, int i) {
-        super(context, attributeSet, i);
-        this.mUiSurface = null;
-        this.mDozeAmount = 0.0f;
-        this.mLoggingInfo = null;
-        this.mAodSettingsObserver = new ContentObserver(new Handler()) { // from class: com.google.android.systemui.smartspace.WeatherSmartspaceView.1
-            @Override // android.database.ContentObserver
-            public final void onChange(boolean z) {
-                WeatherSmartspaceView weatherSmartspaceView = WeatherSmartspaceView.this;
-                boolean z2 = WeatherSmartspaceView.DEBUG;
-                Context context2 = weatherSmartspaceView.getContext();
-                boolean z3 = false;
-                if (Settings.Secure.getIntForUser(context2.getContentResolver(), "doze_always_on", 0, context2.getUserId()) == 1) {
-                    z3 = true;
-                }
-                WeatherSmartspaceView weatherSmartspaceView2 = WeatherSmartspaceView.this;
-                if (weatherSmartspaceView2.mIsAodEnabled == z3) {
+    public WeatherSmartspaceView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        mUiSurface = null;
+        mDozeAmount = 0.0f;
+        mLoggingInfo = null;
+        mAodSettingsObserver = new ContentObserver(new Handler()) {
+            @Override
+            public final void onChange(boolean selfChange) {
+                boolean isAodEnabled = Settings.Secure.getIntForUser(getContext().getContentResolver(), "doze_always_on", 0, getContext().getUserId()) == 1;
+                if (mIsAodEnabled == isAodEnabled) {
                     return;
                 }
-                weatherSmartspaceView2.mIsAodEnabled = z3;
+                mIsAodEnabled = isAodEnabled;
             }
         };
-        context.getTheme().applyStyle(2132017751, false);
-        TypedArray obtainStyledAttributes = context.getTheme().obtainStyledAttributes(attributeSet, R.styleable.WeatherSmartspaceView, 0, 0);
+        context.getTheme().applyStyle(R.style.Smartspace, false);
+        TypedArray obtainStyledAttributes = context.getTheme().obtainStyledAttributes(attrs, R.styleable.WeatherSmartspaceView, 0, 0);
         try {
-            int dimensionPixelSize = obtainStyledAttributes.getDimensionPixelSize(1, context.getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_size));
-            int dimensionPixelSize2 = obtainStyledAttributes.getDimensionPixelSize(0, context.getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_inset));
-            this.mRemoveTextDescent = obtainStyledAttributes.getBoolean(2, false);
-            this.mTextDescentExtraPadding = obtainStyledAttributes.getDimensionPixelSize(3, 0);
+            int iconSize = obtainStyledAttributes.getDimensionPixelSize(1, context.getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_size));
+            int iconInset = obtainStyledAttributes.getDimensionPixelSize(0, context.getResources().getDimensionPixelSize(R.dimen.enhanced_smartspace_icon_inset));
+            mRemoveTextDescent = obtainStyledAttributes.getBoolean(2, false);
+            mTextDescentExtraPadding = obtainStyledAttributes.getDimensionPixelSize(3, 0);
             obtainStyledAttributes.recycle();
-            this.mIconSize = dimensionPixelSize;
-            this.mIconDrawable = new DoubleShadowIconDrawable(context, dimensionPixelSize, dimensionPixelSize2);
+            mIconSize = iconSize;
+            mIconDrawable = new DoubleShadowIconDrawable(iconSize, iconInset, context);
         } catch (Throwable th) {
             obtainStyledAttributes.recycle();
             throw th;

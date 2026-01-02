@@ -2,6 +2,7 @@ android_library {
     name: "bcsmartspace-res",
 
     static_libs: [
+        "androidx.viewpager2_viewpager2",
         "androidx.cardview_cardview",
         "androidx-constraintlayout_constraintlayout",
     ],
@@ -27,6 +28,8 @@ android_library {
         "SystemUISharedLib",
         "SystemUI-statsd",
         "iconloader_base",
+        "smartspace-proto-java",
+        "smartspace-proto-lite-java",
     ],
     manifest: "AndroidManifest.xml",
 
